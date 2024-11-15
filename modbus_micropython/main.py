@@ -31,7 +31,9 @@ led = Pin(LED_PIN, Pin.OUT)
 
 # Global Variables
 VERBOSE_LEVEL = 1
-encoder_position = 0  # Current encoder position
+encoder_position = 0        # Current encoder position
+encoder_offset = 0          # Offset for calibration
+encoder_output_mode = "step"  # "step" or "deg"
 
 # P0680 Bit Descriptions
 P0680_BITS = {
@@ -55,7 +57,7 @@ P0680_BITS = {
 
 def print_verbose(message, level):
     """Prints messages according to the verbosity level."""
-    if VERBOSE_LEVEL >= level:
+    if VERBOSE_LEVEL >= level and VERBOSE_LEVEL > 0:
         print(message)
 
 def show_manual():
@@ -70,14 +72,16 @@ def show_manual():
     - read_speed: Read and display the current motor speed.
     - status: Read and display the current inverter status.
     - reset_fault: Reset inverter faults.
-    - set_verbose [0-4]: Set verbosity level (0 = minimal, 1 = standard, 2 = detailed, 3 = advanced, 4 = maximum).
+    - set_verbose [0-3]: Set verbosity level (0 = no output, 1 = encoder only, 2 = motor info, 3 = all info).
+    - set_encoder_output [step|deg]: Set encoder output format.
+    - calibrate: Set current encoder position as zero.
     - read_max_rpm: Read the maximum RPM from the inverter.
     - help: Display this instruction manual.
     - exit: Exit the program.
     - test: Execute the default test sequence.
     ===========================================
     """
-    print_verbose(manual, 1)
+    print_verbose(manual, 3)
 
 async def led_blink_task():
     """Task to blink the LED."""
@@ -89,13 +93,24 @@ async def led_blink_task():
 def encoder_callback(value, delta):
     global encoder_position
     encoder_position = value
-    print_verbose(f"Encoder Position: {encoder_position}, Delta: {delta}", 2)
+    adjusted_position = encoder_position - encoder_offset
+
+    if encoder_output_mode == "deg":
+        # Convert steps to degrees
+        degrees = (adjusted_position / 2000) * 360  # 2000 pulses per revolution
+        output = f"Encoder Position: {degrees:.2f} degrees"
+    else:
+        # Output in steps
+        output = f"Encoder Position: {adjusted_position} steps"
+
+    if VERBOSE_LEVEL == 1 or VERBOSE_LEVEL == 3:
+        print(output)
 
 # Zero Endstop Position Detection
 def zero_position_callback(pin):
-    global encoder_position
-    encoder_position = 0
-    print_verbose("[INFO] Zero endstop position hit!", 1)
+    global encoder_position, encoder_offset
+    encoder_offset = encoder_position
+    print_verbose("[INFO] Zero endstop position hit! Encoder position reset.", 1)
 
 async def read_user_input():
     loop = asyncio.get_event_loop()
@@ -113,15 +128,16 @@ async def status_request_task():
     STATUS_REQUEST_INTERVAL = 5  # Interval in seconds
     while True:
         fault = cfw500.check_fault()
-        if fault:
-            print_verbose("[ALERT] The inverter is in FAULT.", 1)
-        else:
-            print_verbose("[INFO] The inverter is NOT in fault.", 2)
+        if VERBOSE_LEVEL >= 2:
+            if fault:
+                print("[ALERT] The inverter is in FAULT.")
+            else:
+                print("[INFO] The inverter is NOT in fault.")
         await asyncio.sleep(STATUS_REQUEST_INTERVAL)
 
 async def process_command(command):
     """Processes a single command."""
-    global VERBOSE_LEVEL
+    global VERBOSE_LEVEL, encoder_output_mode, encoder_offset
     parts = command.strip().split()
     if not parts:
         return True  # Continue running
@@ -131,70 +147,101 @@ async def process_command(command):
         if cmd == "start":
             rpm = float(parts[1]) if len(parts) >= 2 else 1000  # Default value
             cfw500.start_motor(rpm)
-            print_verbose(f"[ACTION] Starting the motor at {rpm} RPM.", 1)
+            if VERBOSE_LEVEL >= 2:
+                print(f"[ACTION] Starting the motor at {rpm} RPM.")
         elif cmd == "stop":
             cfw500.stop_motor()
-            print_verbose("[ACTION] Stopping the motor.", 1)
+            if VERBOSE_LEVEL >= 2:
+                print("[ACTION] Stopping the motor.")
         elif cmd == "reverse":
             rpm = float(parts[1]) if len(parts) >= 2 else 1000  # Default value
             cfw500.reverse_motor(rpm)
-            print_verbose(f"[ACTION] Reversing the motor at {rpm} RPM.", 1)
+            if VERBOSE_LEVEL >= 2:
+                print(f"[ACTION] Reversing the motor at {rpm} RPM.")
         elif cmd == "set_speed":
             if len(parts) >= 2:
                 rpm = float(parts[1])
                 cfw500.set_speed_reference(rpm)
-                print_verbose(f"[ACTION] Setting speed reference to {rpm} RPM.", 1)
+                if VERBOSE_LEVEL >= 2:
+                    print(f"[ACTION] Setting speed reference to {rpm} RPM.")
             else:
-                print_verbose("[ERROR] Specify the speed in RPM.", 1)
+                if VERBOSE_LEVEL >= 2:
+                    print("[ERROR] Specify the speed in RPM.")
         elif cmd == "read_speed":
             rpm = cfw500.read_current_speed()
-            if rpm is not None:
-                print_verbose(f"[INFO] Current Speed: {rpm:.2f} RPM", 1)
-            else:
-                print_verbose("[ERROR] Failed to read current speed.", 1)
+            if rpm is not None and VERBOSE_LEVEL >= 2:
+                print(f"[INFO] Current Speed: {rpm:.2f} RPM")
+            elif rpm is None and VERBOSE_LEVEL >= 2:
+                print("[ERROR] Failed to read current speed.")
         elif cmd == "status":
             state = cfw500.read_p0680()
-            if state is not None:
-                print_verbose(f"[STATUS] P0680 = 0x{state:04X}", 1)
-                for bit in range(16):
-                    if state & (1 << bit):
-                        description = P0680_BITS.get(bit, f"Bit {bit} Unknown")
-                        print_verbose(f"    Bit {bit}: {description} ACTIVE", 2)
-            else:
-                print_verbose("[ERROR] Failed to read inverter status.", 1)
+            if state is not None and VERBOSE_LEVEL >= 2:
+                print(f"[STATUS] P0680 = 0x{state:04X}")
+                if VERBOSE_LEVEL == 3:
+                    for bit in range(16):
+                        if state & (1 << bit):
+                            description = P0680_BITS.get(bit, f"Bit {bit} Unknown")
+                            print(f"    Bit {bit}: {description} ACTIVE")
+            elif state is None and VERBOSE_LEVEL >= 2:
+                print("[ERROR] Failed to read inverter status.")
         elif cmd == "reset_fault":
             cfw500.reset_fault()
-            print_verbose("[ACTION] Fault reset command sent.", 1)
+            if VERBOSE_LEVEL >= 2:
+                print("[ACTION] Fault reset command sent.")
         elif cmd == "set_verbose":
             if len(parts) >= 2:
                 level = int(parts[1])
-                if level in [0, 1, 2, 3, 4]:
+                if level in [0, 1, 2, 3]:
                     VERBOSE_LEVEL = level
-                    print_verbose(f"[INFO] Verbosity level set to {VERBOSE_LEVEL}.", 1)
+                    if VERBOSE_LEVEL >= 2:
+                        print(f"[INFO] Verbosity level set to {VERBOSE_LEVEL}.")
                 else:
-                    print_verbose("[ERROR] Invalid verbosity level. Use a value between 0 and 4.", 1)
+                    if VERBOSE_LEVEL >= 2:
+                        print("[ERROR] Invalid verbosity level. Use a value between 0 and 3.")
             else:
-                print_verbose("[ERROR] Specify the verbosity level (0 to 4).", 1)
+                if VERBOSE_LEVEL >= 2:
+                    print("[ERROR] Specify the verbosity level (0 to 3).")
+        elif cmd == "set_encoder_output":
+            if len(parts) >= 2:
+                mode = parts[1].lower()
+                if mode in ["step", "deg"]:
+                    encoder_output_mode = mode
+                    if VERBOSE_LEVEL >= 2:
+                        print(f"[INFO] Encoder output mode set to '{encoder_output_mode}'.")
+                else:
+                    if VERBOSE_LEVEL >= 2:
+                        print("[ERROR] Invalid encoder output mode. Use 'step' or 'deg'.")
+            else:
+                if VERBOSE_LEVEL >= 2:
+                    print("[ERROR] Specify the encoder output mode ('step' or 'deg').")
+        elif cmd == "calibrate":
+            encoder_offset = encoder_position
+            if VERBOSE_LEVEL >= 2:
+                print("[ACTION] Encoder calibrated. Current position set as zero.")
         elif cmd == "read_max_rpm":
             max_rpm = cfw500.read_max_rpm()
-            if max_rpm is not None:
-                print_verbose(f"[INFO] Maximum RPM Read: {max_rpm} RPM", 1)
-            else:
-                print_verbose("[ERROR] Failed to read maximum RPM.", 1)
+            if max_rpm is not None and VERBOSE_LEVEL >= 2:
+                print(f"[INFO] Maximum RPM Read: {max_rpm} RPM")
+            elif max_rpm is None and VERBOSE_LEVEL >= 2:
+                print("[ERROR] Failed to read maximum RPM.")
         elif cmd == "help":
             show_manual()
         elif cmd == "exit":
-            print_verbose("[INFO] Exiting the program.", 1)
+            if VERBOSE_LEVEL >= 2:
+                print("[INFO] Exiting the program.")
             return False  # Signal to exit
         elif cmd == "test":
-            print_verbose("[INFO] Executing the default test sequence.", 1)
+            if VERBOSE_LEVEL >= 2:
+                print("[INFO] Executing the default test sequence.")
             cfw500.start_motor(1000)
             await asyncio.sleep(5)
             cfw500.stop_motor()
         else:
-            print_verbose("[ERROR] Unrecognized command. Type 'help' to see the list of commands.", 1)
+            if VERBOSE_LEVEL >= 2:
+                print("[ERROR] Unrecognized command. Type 'help' to see the list of commands.")
     except Exception as e:
-        print_verbose(f"[ERROR] {e}", 1)
+        if VERBOSE_LEVEL >= 2:
+            print(f"[ERROR] {e}")
     return True  # Continue running
 
 async def main():
@@ -205,28 +252,30 @@ async def main():
 
     # Read the maximum RPM from the inverter
     max_rpm = cfw500.read_max_rpm()
-    if max_rpm is not None:
-        print_verbose(f"[INFO] Maximum RPM Read: {max_rpm} RPM", 1)
-    else:
-        print_verbose("[ERROR] Failed to read maximum RPM.", 1)
+    if max_rpm is not None and VERBOSE_LEVEL >= 2:
+        print(f"[INFO] Maximum RPM Read: {max_rpm} RPM")
+    elif max_rpm is None and VERBOSE_LEVEL >= 2:
+        print("[ERROR] Failed to read maximum RPM.")
 
     # Read the serial interface status
     serial_state = cfw500.read_p0316()
-    if serial_state == 0:
-        print_verbose("[SERIAL] Serial Interface Inactive", 1)
-    elif serial_state == 1:
-        print_verbose("[SERIAL] Serial Interface Active", 1)
-    elif serial_state == 2:
-        print_verbose("[SERIAL] Watchdog Error on Serial Interface", 1)
-    else:
-        print_verbose(f"[SERIAL] Unknown State ({serial_state})", 1)
+    if VERBOSE_LEVEL >= 2:
+        if serial_state == 0:
+            print("[SERIAL] Serial Interface Inactive")
+        elif serial_state == 1:
+            print("[SERIAL] Serial Interface Active")
+        elif serial_state == 2:
+            print("[SERIAL] Watchdog Error on Serial Interface")
+        else:
+            print(f"[SERIAL] Unknown State ({serial_state})")
 
     # Check for faults
     fault = cfw500.check_fault()
-    if fault:
-        print_verbose("[ALERT] The inverter is in FAULT.", 1)
-    else:
-        print_verbose("[INFO] The inverter is NOT in fault.", 1)
+    if VERBOSE_LEVEL >= 2:
+        if fault:
+            print("[ALERT] The inverter is in FAULT.")
+        else:
+            print("[INFO] The inverter is NOT in fault.")
 
     # Configure the encoder pins with internal pull-ups
     pin_a = Pin(16, Pin.IN, Pin.PULL_UP)
@@ -262,6 +311,7 @@ async def main():
 try:
     asyncio.run(main())
 except KeyboardInterrupt:
-    print_verbose("\n[INFO] Program interrupted by user.", 1)
+    if VERBOSE_LEVEL >= 2:
+        print("\n[INFO] Program interrupted by user.")
 finally:
     asyncio.new_event_loop()
