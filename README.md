@@ -181,5 +181,3 @@ This project is licensed under the [MIT License](LICENSE).
 - Omron for encoder specifications
 - All contributors and testers
 ```
-
-This version of the `README.md` is tailored for GitHub with a clean layout, clear sections, and easy-to-navigate formatting. Let me know if you need further refinements!
