@@ -33,7 +33,7 @@ led = Pin(LED_PIN, Pin.OUT)
 VERBOSE_LEVEL = 1
 encoder_position = 0        # Current encoder position
 encoder_offset = 0          # Offset for calibration
-encoder_output_mode = "step"  # "step" or "deg"
+encoder_output_mode = "deg"  # "step" or "deg"
 
 # P0680 Bit Descriptions
 P0680_BITS = {
@@ -81,7 +81,7 @@ def show_manual():
     - test: Execute the default test sequence.
     ===========================================
     """
-    print_verbose(manual, 3)
+    print_verbose(manual, 0)
 
 async def led_blink_task():
     """Task to blink the LED."""
@@ -97,11 +97,12 @@ def encoder_callback(value, delta):
 
     if encoder_output_mode == "deg":
         # Convert steps to degrees
-        degrees = (adjusted_position / 2000) * 360  # 2000 pulses per revolution
+        degrees = adjusted_position * (360 / 8000)  # 0.18 degrees per step
         output = f"Encoder Position: {degrees:.2f} degrees"
     else:
         # Output in steps
-        output = f"Encoder Position: {adjusted_position} steps"
+        steps = adjusted_position / 4
+        output = f"Encoder Position: {steps} steps"
 
     if VERBOSE_LEVEL == 1 or VERBOSE_LEVEL == 3:
         print(output)
@@ -244,11 +245,23 @@ async def process_command(command):
             print(f"[ERROR] {e}")
     return True  # Continue running
 
+async def await_serial_and_show_manual():
+    """Waits for serial communication to be established, then waits 1 second, and then shows the manual."""
+    # Wait for serial communication to be established
+    while True:
+        if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
+            break
+        await asyncio.sleep(0.1)
+    # Wait 1 second
+    await asyncio.sleep(1)
+    # Display the instruction manual
+    show_manual()
+
 async def main():
     global VERBOSE_LEVEL, encoder_position
 
-    # Display the instruction manual
-    show_manual()
+    # Start the task to wait for serial communication and show the manual
+    asyncio.create_task(await_serial_and_show_manual())
 
     # Read the maximum RPM from the inverter
     max_rpm = cfw500.read_max_rpm()
@@ -292,7 +305,7 @@ async def main():
         mod=None,      # Optional modulus
         callback=encoder_callback,  # Function to call on value change
         args=(),       # Arguments for callback
-        delay=100      # Delay in ms between callbacks
+        delay=10      # Delay in ms between callbacks
     )
 
     # Zero Endstop Detection on GPIO18
