@@ -1,7 +1,3 @@
-Here's a clear and GitHub-friendly **`README.md`** file with plain formatting, designed for ease of navigation and readability:
-
----
-
 # Raspberry Pi Pico VFD Motor Control with Quadrature Encoder
 
 This repository provides a robust and modular solution to control a Variable Frequency Drive (VFD) using Modbus RTU communication and read encoder positions with a quadrature encoder. The project is designed with best practices and features asynchronous operations for seamless performance.
