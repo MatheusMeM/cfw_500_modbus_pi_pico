@@ -1,39 +1,39 @@
-Here is the finalized and corrected **`README.md`** file, thoroughly reviewed for accuracy and completeness:
+Here's a clear and GitHub-friendly **`README.md`** file with plain formatting, designed for ease of navigation and readability:
 
-```markdown
+---
+
 # Raspberry Pi Pico VFD Motor Control with Quadrature Encoder
 
-Welcome to the **Raspberry Pi Pico VFD Motor Control with Quadrature Encoder** project! This repository provides a robust and modular solution to control a Variable Frequency Drive (VFD) using Modbus RTU communication and read encoder positions using a quadrature encoder. The code is structured with best practices and features asynchronous operations for seamless performance.
+This repository provides a robust and modular solution to control a Variable Frequency Drive (VFD) using Modbus RTU communication and read encoder positions with a quadrature encoder. The project is designed with best practices and features asynchronous operations for seamless performance.
 
 ---
 
 ## Features
 
-1. **Motor Control via VFD (CFW500):**
-   - Start, stop, and reverse the motor with precise RPM control.
-   - Read current motor speed (RPM) and status.
-   - Reset VFD faults.
+- **Motor Control via VFD (CFW500):**
+  - Start, stop, and reverse the motor with precise RPM control.
+  - Read motor speed (RPM) and status.
+  - Reset VFD faults.
+  
+- **Quadrature Encoder Integration:**
+  - Read encoder positions in steps or degrees.
+  - Support for zero-calibration to set custom reference positions.
+  - Handle "zero position" using the encoder’s Z signal.
 
-2. **Quadrature Encoder Integration:**
-   - Read encoder positions in steps or degrees.
-   - Support for zero-calibration to set custom reference positions.
-   - Handle "zero position" using the encoder's Z (endstop) signal.
+- **Configurable Verbose Levels:**
+  - Control console output:
+    - **0**: No output.
+    - **1**: Encoder position only.
+    - **2**: Motor actions and VFD status.
+    - **3**: Full details (encoder and motor/VFD statuses).
 
-3. **Configurable Verbose Levels:**
-   - Control the amount of information displayed in the console:
-     - **0**: No output.
-     - **1**: Encoder position only.
-     - **2**: Motor actions and VFD status/information.
-     - **3**: Full details of both encoder and motor/VFD.
+- **Async Event Handling:**
+  - Non-blocking encoder reading and motor control using `uasyncio`.
 
-4. **Async Event Handling:**
-   - Non-blocking encoder reading and motor control via `uasyncio`.
-
-5. **Modular Structure:**
-   - Separation of concerns:
-     - `cfw500_modbus.py` for VFD-related functions.
-     - `encoder.py` for encoder handling.
-     - `main.py` for main application logic.
+- **Modular Structure:**
+  - `cfw500_modbus.py`: VFD-related functions.
+  - `encoder.py`: Encoder handling.
+  - `main.py`: Main application logic.
 
 ---
 
@@ -41,26 +41,26 @@ Welcome to the **Raspberry Pi Pico VFD Motor Control with Quadrature Encoder** p
 
 ### Hardware
 
-- [Raspberry Pi Pico](https://www.raspberrypi.com/products/raspberry-pi-pico/)
+- Raspberry Pi Pico
 - Omron E6B2-CWZ6C Quadrature Encoder (2000 PPR)
-- WEG CFW500 VFD with Modbus RTU communication
-- RS485 to UART converter module
-- Motor compatible with the VFD
+- WEG CFW500 VFD with Modbus RTU
+- RS485 to UART converter
+- Motor compatible with VFD
 
 ### Connections
 
-| Encoder Pin       | Raspberry Pi Pico Pin |
-|-------------------|-----------------------|
-| **A (Black)**     | GPIO16                |
-| **B (White)**     | GPIO17                |
-| **Z (Orange)**    | GPIO18                |
-| **+5V (Brown)**   | VBUS (5V)             |
-| **GND (Blue)**    | GND                   |
+| Encoder Pin       | Pico Pin     |
+|-------------------|--------------|
+| A (Black)         | GPIO16       |
+| B (White)         | GPIO17       |
+| Z (Orange)        | GPIO18       |
+| +5V (Brown)       | VBUS (5V)    |
+| GND (Blue)        | GND          |
 
 ### Software
 
-- [Thonny IDE](https://thonny.org/)
-- MicroPython firmware installed on the Raspberry Pi Pico
+- Thonny IDE
+- MicroPython firmware on Pico
 - `uasyncio` library for async operations
 
 ---
@@ -77,139 +77,113 @@ Welcome to the **Raspberry Pi Pico VFD Motor Control with Quadrature Encoder** p
 
 2. **Prepare the Raspberry Pi Pico:**
    - Flash the MicroPython firmware onto the Pico.
-   - Ensure `uasyncio` is available (it's included in standard MicroPython firmware).
+   - Ensure `uasyncio` is included (standard in MicroPython).
 
 3. **Upload Files:**
-   Upload `main.py`, `cfw500_modbus.py`, and `encoder.py` to the Pico using Thonny IDE or your preferred method.
+   - Use Thonny IDE to upload `main.py`, `cfw500_modbus.py`, and `encoder.py` to the Pico.
 
 ---
 
 ## Usage
 
-### Connect the Hardware
+### Commands
 
-Wire the encoder and VFD to the Pico according to the connections table above.
+#### Motor Control
+- `start [rpm]`: Start motor at the specified RPM (default: 1000 RPM).
+- `stop`: Stop the motor.
+- `reverse [rpm]`: Reverse motor at the specified RPM.
+- `set_speed [rpm]`: Update motor speed reference.
+- `reset_fault`: Reset VFD faults.
 
-### Run the Program
+#### Encoder
+- `set_encoder_output [step|deg]`: Set encoder output to steps or degrees.
+- `calibrate`: Set current encoder position as zero.
 
-Execute `main.py` on the Pico via Thonny IDE.
+#### Verbose Control
+- `set_verbose [0-3]`: Adjust verbosity level.
 
-### Available Commands
+#### Miscellaneous
+- `help`: Show command list.
+- `exit`: Exit the program.
+- `test`: Run a test sequence.
 
-#### Motor Commands:
-- `start [rpm]` - Start the motor at the specified RPM (default: 1000 RPM).
-- `stop` - Stop the motor.
-- `reverse [rpm]` - Reverse the motor at the specified RPM.
-- `set_speed [rpm]` - Update the motor's speed reference.
-- `reset_fault` - Reset any VFD faults.
+### Examples
 
-#### Encoder Commands:
-- `set_encoder_output [step|deg]` - Set encoder output to steps or degrees.
-- `calibrate` - Set the current encoder position as the zero reference.
+1. **Start motor at 1200 RPM:**
+   ```bash
+   start 1200
+   ```
 
-#### Verbose Control:
-- `set_verbose [0-3]` - Adjust verbosity levels.
+2. **Set encoder output to degrees:**
+   ```bash
+   set_encoder_output deg
+   ```
 
-#### Miscellaneous:
-- `help` - Display the instruction manual.
-- `exit` - Exit the program.
-- `test` - Execute the default test sequence.
+3. **Calibrate the encoder:**
+   ```bash
+   calibrate
+   ```
 
----
-
-## Examples
-
-### Start the motor at 1200 RPM:
-```bash
-start 1200
-```
-
-### Set encoder output to degrees:
-```bash
-set_encoder_output deg
-```
-
-### Calibrate the encoder to zero:
-```bash
-calibrate
-```
-
-### Stop the motor:
-```bash
-stop
-```
+4. **Stop the motor:**
+   ```bash
+   stop
+   ```
 
 ---
 
-## Code Structure
+## Code Overview
 
-1. **`main.py`**  
-   Handles the main logic of the application:
-   - Asynchronous loops for encoder reading and motor control.
-   - Command processing from the user.
-   - Integration of the zero endstop detection.
+- **`main.py`**:
+  - Main logic with asynchronous loops for encoder and motor control.
+  - Command processing and zero-endstop integration.
 
-2. **`cfw500_modbus.py`**  
-   Contains all the VFD-related functions:
-   - Modbus communication setup and handling.
-   - Reading and writing VFD parameters.
-   - Error handling and fault resetting.
+- **`cfw500_modbus.py`**:
+  - Modbus communication for VFD operations.
+  - Functions for reading/writing parameters and fault handling.
 
-3. **`encoder.py`**  
-   Driver for the quadrature encoder:
-   - Handles A, B, and Z signals.
-   - Provides real-time position updates and callbacks.
-   - Supports calibration and output formatting.
-
----
-
-## Verbose Levels
-
-| Level | Description                                                  |
-|-------|--------------------------------------------------------------|
-| 0     | No output.                                                   |
-| 1     | Encoder position updates only.                               |
-| 2     | Motor actions and all Modbus/VFD-related statuses.           |
-| 3     | Full details: both encoder and motor/VFD statuses are shown. |
+- **`encoder.py`**:
+  - Encoder handling with real-time position updates.
+  - A/B/Z signal processing and calibration support.
 
 ---
 
 ## Troubleshooting
 
-### Motor does not start:
-- Check VFD connections and ensure Modbus parameters match those in the `cfw500_modbus.py` file.
-- Verify that the VFD is powered on and not in a fault state.
+1. **Motor does not start:**
+   - Check VFD connections.
+   - Ensure Modbus parameters match `cfw500_modbus.py`.
+   - Verify VFD power and fault status.
 
-### Encoder position not updating:
-- Verify encoder wiring and connections to GPIO16, GPIO17, and GPIO18.
-- Ensure that the encoder is receiving power and functioning correctly.
+2. **Encoder position not updating:**
+   - Verify wiring for A, B, Z signals (GPIO16, GPIO17, GPIO18).
+   - Ensure encoder is powered and functional.
 
-### Verbose output too noisy or silent:
-- Use `set_verbose [level]` to adjust verbosity levels as needed.
+3. **Verbose output issues:**
+   - Adjust verbosity using `set_verbose [0-3]`.
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Please follow these steps:
-
 1. Fork this repository.
-2. Create a new branch for your feature or bug fix.
-3. Submit a pull request describing your changes.
+2. Create a new branch for your changes.
+3. Submit a pull request with a description of your updates.
 
 ---
 
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for more details.
+This project is licensed under the [MIT License](LICENSE).
 
 ---
 
 ## Acknowledgments
 
-- **MicroPython development team** for the MicroPython firmware.
-- **Peter Hinch** for the encoder library.
-- **WEG** for providing detailed documentation for the CFW500 VFD.
-- **Omron** for the encoder specifications.
-- Community contributors and testers.
+- MicroPython development team
+- Peter Hinch for encoder library contributions
+- WEG for CFW500 documentation
+- Omron for encoder specifications
+- All contributors and testers
 ```
+
+This version of the `README.md` is tailored for GitHub with a clean layout, clear sections, and easy-to-navigate formatting. Let me know if you need further refinements!
