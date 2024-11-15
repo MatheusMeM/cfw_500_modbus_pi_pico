@@ -180,4 +180,3 @@ This project is licensed under the [MIT License](LICENSE).
 - WEG for CFW500 documentation
 - Omron for encoder specifications
 - All contributors and testers
-```
