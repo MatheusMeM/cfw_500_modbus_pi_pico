@@ -30,7 +30,7 @@ LED_PIN = 25  # On-board LED pin on Raspberry Pi Pico
 led = Pin(LED_PIN, Pin.OUT)
 
 # Global Variables
-VERBOSE_LEVEL = 1
+VERBOSE_LEVEL = 3
 encoder_position = 0        # Current encoder position
 encoder_offset = 0          # Offset for calibration
 encoder_output_mode = "deg"  # "step" or "deg"
