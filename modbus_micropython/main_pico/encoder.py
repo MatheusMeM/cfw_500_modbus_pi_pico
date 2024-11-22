@@ -111,3 +111,4 @@ class Encoder:
 
     def value(self):
         return self._cv
+
