@@ -90,7 +90,8 @@ async def process_command(command, cfw500):
                 mode = parts[1].lower()
                 if mode in ["step", "deg"]:
                     state['encoder_output_mode'] = mode
-                    print_verbose(f"[INFO] Encoder output mode set to '{state['encoder_output_mode']}'.", 2, override=True)
+                    save_configuration()  # Save the new setting
+                    print_verbose(f"[INFO] Encoder output mode set to '{state['encoder_output_mode']}' and saved.", 2, override=True)
                 else:
                     print_verbose("[ERROR] Invalid encoder output mode. Use 'step' or 'deg'.", 2, override=True)
             else:

@@ -14,7 +14,7 @@ state = {
     'encoder_zero_offset': 0,
 }
 
-CONFIG_FILE = "config.json"  # Configuration file to save encoder offset
+CONFIG_FILE = "config.json"  # Configuration file to save settings
 
 # UART1 for RS485 communication
 UART1_ID = 1  # UART1 for user commands
@@ -68,9 +68,10 @@ Available Commands:
     print_verbose(manual, 0, override=True)
 
 def save_configuration():
-    """Saves the encoder offset to a configuration file."""
+    """Saves settings to a configuration file."""
     config = {
-        "encoder_offset": state['encoder_offset']
+        "encoder_offset": state['encoder_offset'],
+        "encoder_output_mode": state['encoder_output_mode']
     }
     try:
         with open(CONFIG_FILE, 'w') as f:
@@ -80,15 +81,19 @@ def save_configuration():
         print_verbose(f"[ERROR] Failed to save configuration: {e}", 0)
 
 def load_configuration():
-    """Loads the encoder offset from the configuration file."""
+    """Loads settings from the configuration file."""
     try:
         with open(CONFIG_FILE, 'r') as f:
             config = json.load(f)
         state['encoder_offset'] = config.get("encoder_offset", 0)
+        state['encoder_output_mode'] = config.get("encoder_output_mode", "deg")
         print_verbose(f"[INFO] Loaded encoder offset from configuration: {state['encoder_offset']}", 0)
+        print_verbose(f"[INFO] Loaded encoder output mode from configuration: '{state['encoder_output_mode']}'", 0)
     except FileNotFoundError:
         print_verbose("[WARNING] Configuration file not found. Using default settings.", 0)
         state['encoder_offset'] = 0
+        state['encoder_output_mode'] = "deg"
     except Exception as e:
         print_verbose(f"[ERROR] Failed to load configuration: {e}", 0)
         state['encoder_offset'] = 0
+        state['encoder_output_mode'] = "deg"
