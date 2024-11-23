@@ -4,9 +4,10 @@ import time
 import sys
 import uasyncio as asyncio
 from machine import Pin, UART
-from cfw500_modbus import CFW500Modbus
-from encoder import Encoder
-import json  # For configuration file handling
+from motor_control import initialize_cfw500
+from encoder_module import initialize_encoder, encoder_callback
+from utils import print_verbose, show_manual, load_configuration, state, user_cmd_uart, DE_RE_UART1_PIN
+from commands import process_command
 
 # Configuration for UART0 (Modbus RTU communication with VFD)
 UART0_ID = 0  # UART0 for Modbus RTU
@@ -16,103 +17,12 @@ DE_RE_PIN = Pin(2, Pin.OUT)
 DE_RE_PIN.value(0)  # Initially enable receiver
 SLAVE_ADDRESS = 1  # Modbus slave address of the inverter
 
-# Configuration for UART1 (RS485 communication with PC via Relay Pico)
-UART1_ID = 1  # UART1 for user commands
-USER_CMD_TX_PIN = 4  # GPIO4 (TX) for UART1
-USER_CMD_RX_PIN = 5  # GPIO5 (RX) for UART1
-DE_RE_UART1_PIN = Pin(3, Pin.OUT)  # GPIO3 for DE/RE control
-DE_RE_UART1_PIN.value(0)  # Initially enable receiver
-
-# Initialize Modbus and CFW500
-cfw500 = CFW500Modbus(
-    uart_id=UART0_ID,
-    tx_pin=TX_PIN_NUM,
-    rx_pin=RX_PIN_NUM,
-    de_re_pin=DE_RE_PIN,
-    slave_address=SLAVE_ADDRESS
-)
-
-# Initialize UART1 for RS485 communication
-user_cmd_uart = UART(UART1_ID, baudrate=115200, tx=USER_CMD_TX_PIN, rx=USER_CMD_RX_PIN)
-user_cmd_uart.init(bits=8, parity=None, stop=1)  # Use 1 stop bit for higher baud rates
-
 # LED Configuration
 LED_PIN = 25  # On-board LED pin on Raspberry Pi Pico
 led = Pin(LED_PIN, Pin.OUT)
 
-# Global Variables
-VERBOSE_LEVEL = 1
-encoder_position = 0        # Current encoder position relative to zero offset
-encoder_offset = 0          # Offset for calibration
-encoder_output_mode = "deg"  # "step" or "deg"
-CONFIG_FILE = "config.json"  # Configuration file to save encoder offset
-homing_completed = False     # Flag to indicate if homing is completed
-encoder_zero_offset = 0      # Stores the encoder count at the zero (home) position
-
-# Constants for position limits
-MAX_STEPS = 8000  # Maximum steps before reset
-MAX_DEGREES = 360  # Maximum degrees before reset
-
-# P0680 Bit Descriptions
-P0680_BITS = {
-    0: "STO - Safe Torque Off",
-    1: "Command Rotate",
-    2: "Reserved",
-    3: "Reserved",
-    4: "Rapid Stop Active",
-    5: "Second Ramp Active",
-    6: "Configuration Mode",
-    7: "Alarm",
-    8: "Ramp Enabled - RUN",
-    9: "General Enabled",
-    10: "Rotation Direction",
-    11: "JOG Active",
-    12: "LOC/REM Mode",
-    13: "Undervoltage",
-    14: "Automatic - PID",
-    15: "Fault"
-}
-
-def print_verbose(message, level, override=False):
-    """Prints messages according to the verbosity level."""
-    if override or (VERBOSE_LEVEL >= level and VERBOSE_LEVEL > 0):
-        # Also print to USB serial for debugging
-        print(message)
-
-        # Send message over UART1 (RS485) line by line
-        lines = message.split('\n')
-        for line in lines:
-            line_to_send = line + '\n'
-            DE_RE_UART1_PIN.value(1)  # Enable transmitter
-            user_cmd_uart.write(line_to_send.encode('utf-8'))
-            user_cmd_uart.flush()  # Wait for transmission to complete
-            time.sleep(0.02)  # Small delay to ensure data is sent
-            DE_RE_UART1_PIN.value(0)  # Enable receiver
-            time.sleep(0.01)  # Small delay before sending next line
-
-def show_manual():
-    """Displays the instruction manual."""
-    manual = """
-========== INSTRUCTION MANUAL ==========
-Available Commands:
-- start [rpm]: Start the motor with the specified RPM.
-- stop: Stop the motor.
-- reverse [rpm]: Reverse the motor direction with the specified RPM.
-- set_speed [rpm]: Change the motor speed reference to the specified RPM.
-- read_speed: Read and display the current motor speed.
-- status: Read and display the current inverter status.
-- reset_fault: Reset inverter faults.
-- set_verbose [0-3]: Set verbosity level (0 = no output, 1 = encoder only, 2 = motor info, 3 = all info).
-- set_encoder_output [step|deg]: Set encoder output format.
-- calibrate: Set current encoder position as zero and save offset.
-- read_offset: Read and display the current encoder offset.
-- read_max_rpm: Read the maximum RPM from the inverter.
-- help: Display this instruction manual.
-- exit: Exit the program.
-- test: Execute the default test sequence.
-===========================================
-"""
-    print_verbose(manual, 0, override=True)
+# Zero Endstop Detection on GPIO18
+zero_pin = Pin(18, Pin.IN, Pin.PULL_UP)
 
 async def led_blink_task():
     """Task to blink the LED."""
@@ -120,76 +30,14 @@ async def led_blink_task():
         led.toggle()
         await asyncio.sleep(0.5)
 
-def save_configuration():
-    """Saves the encoder offset to a configuration file."""
-    config = {
-        "encoder_offset": encoder_offset
-    }
-    try:
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump(config, f)
-        print_verbose("[INFO] Configuration saved.", 0)
-    except Exception as e:
-        print_verbose(f"[ERROR] Failed to save configuration: {e}", 0)
-
-def load_configuration():
-    """Loads the encoder offset from the configuration file."""
-    global encoder_offset
-    try:
-        with open(CONFIG_FILE, 'r') as f:
-            config = json.load(f)
-        encoder_offset = config.get("encoder_offset", 0)
-        print_verbose(f"[INFO] Loaded encoder offset from configuration: {encoder_offset}", 0)
-    except FileNotFoundError:
-        print_verbose("[WARNING] Configuration file not found. Using default settings.", 0)
-        encoder_offset = 0
-    except Exception as e:
-        print_verbose(f"[ERROR] Failed to load configuration: {e}", 0)
-        encoder_offset = 0
-
-# Callback function to handle encoder changes
-def encoder_callback(value, delta):
-    global encoder_position, encoder_offset, homing_completed, encoder_zero_offset
-    # Adjust encoder_position relative to the zero offset
-    encoder_position = value - encoder_zero_offset
-
-    if not homing_completed:
-        # Before homing is completed, do not apply encoder_offset
-        adjusted_position = encoder_position
-    else:
-        # After homing, apply encoder_offset
-        adjusted_position = encoder_position - encoder_offset
-
-    # Check if adjusted_position exceeds positive limit
-    if adjusted_position >= MAX_STEPS:
-        # Reset encoder_offset to maintain correct counts
-        encoder_offset += MAX_STEPS
-        adjusted_position -= MAX_STEPS
-    # Check if adjusted_position exceeds negative limit
-    elif adjusted_position <= -MAX_STEPS:
-        encoder_offset -= MAX_STEPS
-        adjusted_position += MAX_STEPS
-
-    if encoder_output_mode == "deg":
-        # Convert steps to degrees
-        degrees = adjusted_position * (360 / MAX_STEPS)
-        output = f"Encoder Position: {degrees:.2f} degrees"
-    else:
-        # Output in steps
-        output = f"Encoder Position: {adjusted_position} steps"
-
-    if VERBOSE_LEVEL == 1 or VERBOSE_LEVEL == 3:
-        print_verbose(output, 1)
-
 # Zero Endstop Position Detection
 def zero_position_callback(pin):
     """Callback function when the endstop (zero position) is detected."""
     print_verbose("[INFO] Zero position detected.", 1)
     # Do not reset the encoder position; only output a message
 
-async def homing():
+async def homing(cfw500):
     """Performs the homing routine to establish the zero position."""
-    global encoder_position, zero_pin, homing_completed, encoder_zero_offset
     print_verbose("[INFO] Starting homing routine...", 0)
 
     # Move motor towards the endstop slowly
@@ -209,9 +57,8 @@ async def homing():
         print_verbose("[INFO] Endstop triggered during homing.", 0)
 
         # Capture the encoder's hardware count as the zero offset
-        global encoder_zero_offset
-        encoder_zero_offset = encoder_zero_offset + encoder_position
-        print_verbose(f"[DEBUG] Encoder zero offset set to: {encoder_zero_offset}", 0)
+        state['encoder_zero_offset'] += state['encoder_position']
+        print_verbose(f"[DEBUG] Encoder zero offset set to: {state['encoder_zero_offset']}", 0)
 
     zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=endstop_triggered_callback)
 
@@ -231,7 +78,7 @@ async def homing():
     zero_pin.irq(handler=None)
 
     # Calculate steps to move to align with saved encoder_offset
-    steps_to_target = encoder_offset  # Corrected calculation
+    steps_to_target = state['encoder_offset']  # Corrected calculation
     print_verbose(f"[DEBUG] Calculated steps to target: {steps_to_target}", 0)
 
     if steps_to_target == 0:
@@ -254,10 +101,10 @@ async def homing():
             return
 
         # Move until we reach the target encoder position
-        target_position = encoder_offset  # Since encoder_position is adjusted
+        target_position = state['encoder_offset']  # Since encoder_position is adjusted
         print_verbose(f"[DEBUG] Target encoder position: {target_position}", 0)
         while True:
-            current_position = encoder_position
+            current_position = state['encoder_position']
             print_verbose(f"[DEBUG] Current encoder position: {current_position}", 0)
             if (direction == 'forward' and current_position >= target_position) or \
                (direction == 'reverse' and current_position <= target_position):
@@ -276,13 +123,13 @@ async def homing():
     print_verbose("[INFO] Homing complete. Encoder offset remains unchanged.", 0)
 
     # Set homing_completed to True
-    homing_completed = True
+    state['homing_completed'] = True
     print_verbose("[DEBUG] Homing completed. Encoder offset will now be applied.", 0)
 
     # Re-setup the endstop to only output a message when triggered, but not reset position
     zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=zero_position_callback)
 
-async def read_user_input():
+async def read_user_input(cfw500):
     rx_buffer = b''
     while True:
         if user_cmd_uart.any():
@@ -296,123 +143,23 @@ async def read_user_input():
                         user_input = line.decode('utf-8').strip()
                         if user_input:
                             print(f"[DEBUG] Received command: {user_input}")
-                            should_continue = await process_command(user_input)
+                            should_continue = await process_command(user_input, cfw500)
                             if not should_continue:
                                 return
                     except Exception as e:
                         print_verbose(f"[ERROR] Exception during decoding: {e}", 2)
         await asyncio.sleep(0.1)
 
-async def status_request_task():
+async def status_request_task(cfw500):
     STATUS_REQUEST_INTERVAL = 5  # Interval in seconds
     while True:
         fault = cfw500.check_fault()
-        if VERBOSE_LEVEL >= 2:
+        if state['VERBOSE_LEVEL'] >= 2:
             if fault:
                 print_verbose("[ALERT] The inverter is in FAULT.", 2)
             else:
                 print_verbose("[INFO] The inverter is NOT in fault.", 2)
         await asyncio.sleep(STATUS_REQUEST_INTERVAL)
-
-async def process_command(command):
-    """Processes a single command."""
-    global VERBOSE_LEVEL, encoder_output_mode, encoder_offset
-    print(f"[DEBUG] Processing command: {command}")
-    parts = command.strip().split()
-    if not parts:
-        return True  # Continue running
-    cmd = parts[0].lower()
-
-    try:
-        if cmd == "start":
-            rpm = float(parts[1]) if len(parts) >= 2 else 1000  # Default value
-            cfw500.start_motor(rpm)
-            if VERBOSE_LEVEL >= 2:
-                print_verbose(f"[ACTION] Starting the motor at {rpm} RPM.", 2)
-        elif cmd == "stop":
-            cfw500.stop_motor()
-            if VERBOSE_LEVEL >= 2:
-                print_verbose("[ACTION] Stopping the motor.", 2)
-        elif cmd == "reverse":
-            rpm = float(parts[1]) if len(parts) >= 2 else 1000  # Default value
-            cfw500.reverse_motor(rpm)
-            if VERBOSE_LEVEL >= 2:
-                print_verbose(f"[ACTION] Reversing the motor at {rpm} RPM.", 2)
-        elif cmd == "set_speed":
-            if len(parts) >= 2:
-                rpm = float(parts[1])
-                cfw500.set_speed_reference(rpm)
-                if VERBOSE_LEVEL >= 2:
-                    print_verbose(f"[ACTION] Setting speed reference to {rpm} RPM.", 2)
-            else:
-                print_verbose("[ERROR] Specify the speed in RPM.", 2, override=True)
-        elif cmd == "read_speed":
-            rpm = cfw500.read_current_speed()
-            if rpm is not None:
-                print_verbose(f"[INFO] Current Speed: {rpm:.2f} RPM", 2, override=True)
-            else:
-                print_verbose("[ERROR] Failed to read current speed.", 2, override=True)
-        elif cmd == "status":
-            state = cfw500.read_p0680()
-            if state is not None:
-                print_verbose(f"[STATUS] P0680 = 0x{state:04X}", 2, override=True)
-                if VERBOSE_LEVEL == 3:
-                    for bit in range(16):
-                        if state & (1 << bit):
-                            description = P0680_BITS.get(bit, f"Bit {bit} Unknown")
-                            print_verbose(f"    Bit {bit}: {description} ACTIVE", 3)
-            else:
-                print_verbose("[ERROR] Failed to read inverter status.", 2, override=True)
-        elif cmd == "reset_fault":
-            cfw500.reset_fault()
-            print_verbose("[ACTION] Fault reset command sent.", 2, override=True)
-        elif cmd == "set_verbose":
-            if len(parts) >= 2:
-                level = int(parts[1])
-                if level in [0, 1, 2, 3]:
-                    VERBOSE_LEVEL = level
-                    print_verbose(f"[INFO] Verbosity level set to {VERBOSE_LEVEL}.", 2, override=True)
-                else:
-                    print_verbose("[ERROR] Invalid verbosity level. Use a value between 0 and 3.", 2, override=True)
-            else:
-                print_verbose("[ERROR] Specify the verbosity level (0 to 3).", 2, override=True)
-        elif cmd == "set_encoder_output":
-            if len(parts) >= 2:
-                mode = parts[1].lower()
-                if mode in ["step", "deg"]:
-                    encoder_output_mode = mode
-                    print_verbose(f"[INFO] Encoder output mode set to '{encoder_output_mode}'.", 2, override=True)
-                else:
-                    print_verbose("[ERROR] Invalid encoder output mode. Use 'step' or 'deg'.", 2, override=True)
-            else:
-                print_verbose("[ERROR] Specify the encoder output mode ('step' or 'deg').", 2, override=True)
-        elif cmd == "calibrate":
-            encoder_offset = encoder_position
-            save_configuration()
-            print_verbose("[ACTION] Encoder calibrated. Current position set as zero.", 2, override=True)
-        elif cmd == "read_offset":
-            print_verbose(f"[INFO] Encoder offset: {encoder_offset}", 2, override=True)
-        elif cmd == "read_max_rpm":
-            max_rpm = cfw500.read_max_rpm()
-            if max_rpm is not None:
-                print_verbose(f"[INFO] Maximum RPM Read: {max_rpm} RPM", 2, override=True)
-            else:
-                print_verbose("[ERROR] Failed to read maximum RPM.", 2, override=True)
-        elif cmd == "help":
-            show_manual()
-        elif cmd == "exit":
-            print_verbose("[INFO] Exiting the program.", 2, override=True)
-            return False  # Signal to exit
-        elif cmd == "test":
-            print_verbose("[INFO] Executing the default test sequence.", 2, override=True)
-            cfw500.start_motor(1000)
-            await asyncio.sleep(5)
-            cfw500.stop_motor()
-        else:
-            print_verbose("[ERROR] Unrecognized command. Type 'help' to see the list of commands.", 2, override=True)
-    except Exception as e:
-        print_verbose(f"[ERROR] Exception occurred: {e}", 2, override=True)
-    return True  # Continue running
 
 async def await_serial_and_show_manual():
     """Waits for serial communication to be established, then shows the manual."""
@@ -423,24 +170,22 @@ async def await_serial_and_show_manual():
     show_manual()
 
 async def main():
-    global VERBOSE_LEVEL, encoder_position, cfw500, zero_pin, homing_completed, encoder_zero_offset
-
-    homing_completed = False  # Initialize homing status
-    encoder_zero_offset = 0   # Reset encoder zero offset
+    # Initialize cfw500
+    cfw500 = initialize_cfw500(UART0_ID, TX_PIN_NUM, RX_PIN_NUM, DE_RE_PIN, SLAVE_ADDRESS)
 
     # Start the task to wait for serial communication and show the manual
     asyncio.create_task(await_serial_and_show_manual())
 
     # Read the maximum RPM from the inverter
     max_rpm = cfw500.read_max_rpm()
-    if max_rpm is not None and VERBOSE_LEVEL >= 2:
+    if max_rpm is not None and state['VERBOSE_LEVEL'] >= 2:
         print_verbose(f"[INFO] Maximum RPM Read: {max_rpm} RPM", 2)
-    elif max_rpm is None and VERBOSE_LEVEL >= 2:
+    elif max_rpm is None and state['VERBOSE_LEVEL'] >= 2:
         print_verbose("[ERROR] Failed to read maximum RPM.", 2)
 
     # Read the serial interface status
     serial_state = cfw500.read_p0316()
-    if VERBOSE_LEVEL >= 2:
+    if state['VERBOSE_LEVEL'] >= 2:
         if serial_state == 0:
             print_verbose("[SERIAL] Serial Interface Inactive", 2)
         elif serial_state == 1:
@@ -452,44 +197,28 @@ async def main():
 
     # Check for faults
     fault = cfw500.check_fault()
-    if VERBOSE_LEVEL >= 2:
+    if state['VERBOSE_LEVEL'] >= 2:
         if fault:
             print_verbose("[ALERT] The inverter is in FAULT.", 2)
         else:
             print_verbose("[INFO] The inverter is NOT in fault.", 2)
 
-    # Configure the encoder pins with internal pull-ups
-    pin_a = Pin(16, Pin.IN, Pin.PULL_UP)
-    pin_b = Pin(17, Pin.IN, Pin.PULL_UP)
-
     # Initialize the Encoder
-    encoder = Encoder(
-        pin_x=pin_a,
-        pin_y=pin_b,
-        v=0,           # Initial value
-        div=1,         # Division factor (adjust if needed)
-        vmin=None,     # Optional minimum value
-        vmax=None,     # Optional maximum value
-        mod=None,      # Optional modulus
-        callback=encoder_callback,  # Function to call on value change
-        args=(),       # Arguments for callback
-        delay=10       # Delay in ms between callbacks
-    )
+    initialize_encoder(16, 17, lambda v, d: encoder_callback(v, d, state))
 
-    # Zero Endstop Detection on GPIO18
-    zero_pin = Pin(18, Pin.IN, Pin.PULL_UP)
+    # Zero Endstop Detection
     zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=zero_position_callback)
 
     # Load configuration
     load_configuration()
 
     # Perform homing routine
-    await homing()
+    await homing(cfw500)
 
     # Start tasks
     asyncio.create_task(led_blink_task())
-    asyncio.create_task(read_user_input())
-    asyncio.create_task(status_request_task())
+    asyncio.create_task(read_user_input(cfw500))
+    asyncio.create_task(status_request_task(cfw500))
 
     # Keep the main loop running
     while True:
@@ -498,7 +227,7 @@ async def main():
 try:
     asyncio.run(main())
 except KeyboardInterrupt:
-    if VERBOSE_LEVEL >= 2:
+    if state['VERBOSE_LEVEL'] >= 2:
         print_verbose("\n[INFO] Program interrupted by user.", 2)
 finally:
     asyncio.new_event_loop()
