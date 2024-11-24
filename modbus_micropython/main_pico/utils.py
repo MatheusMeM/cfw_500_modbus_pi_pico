@@ -71,7 +71,8 @@ def save_configuration():
     """Saves settings to a configuration file."""
     config = {
         "encoder_offset": state['encoder_offset'],
-        "encoder_output_mode": state['encoder_output_mode']
+        "encoder_output_mode": state['encoder_output_mode'],
+        "VERBOSE_LEVEL": state['VERBOSE_LEVEL']
     }
     try:
         with open(CONFIG_FILE, 'w') as f:
@@ -87,13 +88,17 @@ def load_configuration():
             config = json.load(f)
         state['encoder_offset'] = config.get("encoder_offset", 0)
         state['encoder_output_mode'] = config.get("encoder_output_mode", "deg")
+        state['VERBOSE_LEVEL'] = config.get("VERBOSE_LEVEL", 1)
         print_verbose(f"[INFO] Loaded encoder offset from configuration: {state['encoder_offset']}", 0)
         print_verbose(f"[INFO] Loaded encoder output mode from configuration: '{state['encoder_output_mode']}'", 0)
+        print_verbose(f"[INFO] Loaded verbosity level from configuration: {state['VERBOSE_LEVEL']}", 0)
     except FileNotFoundError:
         print_verbose("[WARNING] Configuration file not found. Using default settings.", 0)
         state['encoder_offset'] = 0
         state['encoder_output_mode'] = "deg"
+        state['VERBOSE_LEVEL'] = 1
     except Exception as e:
         print_verbose(f"[ERROR] Failed to load configuration: {e}", 0)
         state['encoder_offset'] = 0
         state['encoder_output_mode'] = "deg"
+        state['VERBOSE_LEVEL'] = 1

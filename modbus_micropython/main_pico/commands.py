@@ -80,7 +80,8 @@ async def process_command(command, cfw500):
                 level = int(parts[1])
                 if level in [0, 1, 2, 3]:
                     state['VERBOSE_LEVEL'] = level
-                    print_verbose(f"[INFO] Verbosity level set to {state['VERBOSE_LEVEL']}.", 2, override=True)
+                    save_configuration()  # Save the new verbosity level
+                    print_verbose(f"[INFO] Verbosity level set to {state['VERBOSE_LEVEL']} and saved.", 2, override=True)
                 else:
                     print_verbose("[ERROR] Invalid verbosity level. Use a value between 0 and 3.", 2, override=True)
             else:
