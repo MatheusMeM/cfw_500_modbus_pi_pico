@@ -20,7 +20,7 @@ CONFIG_FILE = "config.json"  # Configuration file to save settings
 UART1_ID = 1  # UART1 for user commands
 USER_CMD_TX_PIN = 4  # GPIO4 (TX) for UART1
 USER_CMD_RX_PIN = 5  # GPIO5 (RX) for UART1
-DE_RE_UART1_PIN = Pin(3, Pin.OUT)  # GPIO3 for DE/RE control
+DE_RE_UART1_PIN = Pin(6, Pin.OUT)  # GPIO6 for DE/RE control
 DE_RE_UART1_PIN.value(0)  # Initially enable receiver
 
 user_cmd_uart = UART(UART1_ID, baudrate=115200, tx=USER_CMD_TX_PIN, rx=USER_CMD_RX_PIN)
