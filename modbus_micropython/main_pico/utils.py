@@ -12,6 +12,7 @@ state = {
     'encoder_output_mode': "deg",
     'homing_completed': False,
     'encoder_zero_offset': 0,
+    'fault_detected': False,  # Add this line
 }
 
 CONFIG_FILE = "config.json"  # Configuration file to save settings

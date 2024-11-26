@@ -24,8 +24,14 @@ led = Pin(LED_PIN, Pin.OUT)
 # Zero Endstop Detection on GPIO18
 zero_pin = Pin(18, Pin.IN, Pin.PULL_UP)
 
+# Initialize Relay Control Pins
+relay_pin1 = Pin(20, Pin.OUT)
+relay_pin2 = Pin(21, Pin.OUT)
+relay_pin1.value(0)
+relay_pin2.value(0)
+
 async def led_blink_task():
-    """Task to blink the LED."""
+    """Task to blink the on-board LED."""
     while True:
         led.toggle()
         await asyncio.sleep(0.5)
@@ -154,12 +160,29 @@ async def status_request_task(cfw500):
     STATUS_REQUEST_INTERVAL = 5  # Interval in seconds
     while True:
         fault = cfw500.check_fault()
+        state['fault_detected'] = fault  # Update the fault status in the shared state
         if state['VERBOSE_LEVEL'] >= 2:
             if fault:
                 print_verbose("[ALERT] The inverter is in FAULT.", 2)
             else:
                 print_verbose("[INFO] The inverter is NOT in fault.", 2)
         await asyncio.sleep(STATUS_REQUEST_INTERVAL)
+
+async def relay_control_task():
+    while True:
+        if state['fault_detected']:
+            # Blink the relay-controlled LEDs
+            relay_pin1.value(1)
+            relay_pin2.value(1)
+            await asyncio.sleep(0.5)
+            relay_pin1.value(0)
+            relay_pin2.value(0)
+            await asyncio.sleep(0.5)
+        else:
+            # No fault, keep the relay-controlled LEDs on
+            relay_pin1.value(1)
+            relay_pin2.value(1)
+            await asyncio.sleep(1)  # Check the fault status every second
 
 async def await_serial_and_show_manual():
     """Waits for serial communication to be established, then shows the manual."""
@@ -197,6 +220,7 @@ async def main():
 
     # Check for faults
     fault = cfw500.check_fault()
+    state['fault_detected'] = fault  # Initialize the fault status
     if state['VERBOSE_LEVEL'] >= 2:
         if fault:
             print_verbose("[ALERT] The inverter is in FAULT.", 2)
@@ -219,6 +243,7 @@ async def main():
     asyncio.create_task(led_blink_task())
     asyncio.create_task(read_user_input(cfw500))
     asyncio.create_task(status_request_task(cfw500))
+    asyncio.create_task(relay_control_task())  # Start the relay control task
 
     # Keep the main loop running
     while True:
