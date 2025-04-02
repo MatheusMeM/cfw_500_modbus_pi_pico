@@ -39,10 +39,10 @@ def print_verbose(message, level, override=False):
             line_to_send = line + '\n'
             DE_RE_UART1_PIN.value(1)  # Enable transmitter
             user_cmd_uart.write(line_to_send.encode('utf-8'))
-            user_cmd_uart.flush()  # Wait for transmission to complete
-            time.sleep(0.02)  # Small delay to ensure data is sent
+            # Removed flush() - let UART buffer handle it
+            time.sleep(0.02)  # Delay may still be needed for DE/RE toggle timing
             DE_RE_UART1_PIN.value(0)  # Enable receiver
-            time.sleep(0.01)  # Small delay before sending next line
+            # Removed sleep(0.01)
 
 def show_manual():
     """Displays the instruction manual."""

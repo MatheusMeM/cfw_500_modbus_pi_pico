@@ -45,11 +45,11 @@ def encoder_callback(value, delta, state):
         adjusted_position += MAX_STEPS
 
     if state['encoder_output_mode'] == "deg":
-        # Apply modulo 360 to wrap degrees
-        degrees = (adjusted_position * (360 / MAX_STEPS)) % 360
-        # Ensure result is positive if modulo returns negative for negative input
-        if degrees < 0:
-            degrees += 360
+        # Calculate degrees and wrap using modulo
+        raw_degrees = adjusted_position * (360 / MAX_STEPS)
+        wrapped_degrees = raw_degrees % 360
+        # Ensure the result is always positive (Python's % can return negative)
+        degrees = (wrapped_degrees + 360) % 360
         output = f"Encoder Position: {degrees:.2f} degrees"
     else:
         output = f"Encoder Position: {adjusted_position} steps"
