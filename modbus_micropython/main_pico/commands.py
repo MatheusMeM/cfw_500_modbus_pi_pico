@@ -36,23 +36,23 @@ async def process_command(command, cfw500):
         if cmd == "start":
             rpm = float(parts[1]) if len(parts) >= 2 else 1000  # Default value
             cfw500.start_motor(rpm)
-            if state['VERBOSE_LEVEL'] >= 2:
-                print_verbose(f"[ACTION] Starting the motor at {rpm} RPM.", 2)
+            # Always print confirmation for direct user commands
+            print_verbose(f"[ACTION] Starting the motor at {rpm} RPM.", 2, override=True)
         elif cmd == "stop":
             cfw500.stop_motor()
-            if state['VERBOSE_LEVEL'] >= 2:
-                print_verbose("[ACTION] Stopping the motor.", 2)
+            # Always print confirmation for direct user commands
+            print_verbose("[ACTION] Stopping the motor.", 2, override=True)
         elif cmd == "reverse":
             rpm = float(parts[1]) if len(parts) >= 2 else 1000  # Default value
             cfw500.reverse_motor(rpm)
-            if state['VERBOSE_LEVEL'] >= 2:
-                print_verbose(f"[ACTION] Reversing the motor at {rpm} RPM.", 2)
+             # Always print confirmation for direct user commands
+            print_verbose(f"[ACTION] Reversing the motor at {rpm} RPM.", 2, override=True)
         elif cmd == "set_speed":
             if len(parts) >= 2:
                 rpm = float(parts[1])
                 cfw500.set_speed_reference(rpm)
-                if state['VERBOSE_LEVEL'] >= 2:
-                    print_verbose(f"[ACTION] Setting speed reference to {rpm} RPM.", 2)
+                # Always print confirmation for direct user commands
+                print_verbose(f"[ACTION] Setting speed reference to {rpm} RPM.", 2, override=True)
             else:
                 print_verbose("[ERROR] Specify the speed in RPM.", 2, override=True)
         elif cmd == "read_speed":
