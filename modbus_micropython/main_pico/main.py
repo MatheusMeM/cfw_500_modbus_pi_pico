@@ -24,6 +24,9 @@ led = Pin(LED_PIN, Pin.OUT)
 # Zero Endstop Detection on GPIO18
 zero_pin = Pin(18, Pin.IN, Pin.PULL_UP)
 
+# Event for signaling endstop trigger from IRQ
+endstop_event = asyncio.Event()
+
 # Initialize Relay Control Pins
 relay_pin1 = Pin(20, Pin.OUT)
 relay_pin2 = Pin(21, Pin.OUT)
@@ -44,6 +47,8 @@ def zero_position_callback(pin):
 
 async def homing(cfw500):
     """Performs the homing routine to establish the zero position."""
+    # Clear the event before starting
+    endstop_event.clear()
     print_verbose("[INFO] Starting homing routine...", 0)
 
     # Move motor towards the endstop
@@ -68,11 +73,17 @@ async def homing(cfw500):
         state['encoder_zero_offset'] = state['encoder_position'] # Assign directly, don't accumulate
         print_verbose(f"[DEBUG] Encoder zero offset set to: {state['encoder_zero_offset']}", 0)
 
-    # Wait in a loop until endstop is triggered
-    while not endstop_triggered:
-        await asyncio.sleep(0.1)
+        # Signal the main homing loop that the endstop was hit
+        endstop_event.set()
 
-    # Stop the motor
+    # Attach the IRQ handler
+    zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=endstop_triggered_callback)
+
+    # Wait efficiently for the IRQ to signal via the event
+    print_verbose("[DEBUG] Waiting for endstop event...", 0)
+    await endstop_event.wait()
+
+    # Stop the motor (This happens *after* the event is set and wait() returns)
     try:
         cfw500.stop_motor()
         print_verbose("[ACTION] Motor stopped after homing.", 0)
@@ -207,10 +218,11 @@ async def main():
     try:
         print_verbose("[SAFETY] Ensuring motor is stopped on startup...", 2)
         cfw500.stop_motor()
-        await asyncio.sleep(0.2) # Short delay to allow stop command to process
-        print_verbose("[SAFETY] Motor stop command sent.", 2)
+        print_verbose("[SAFETY] Motor stop command sent. Waiting 5s for deceleration...", 2)
+        await asyncio.sleep(5.0) # Wait 5 seconds for VFD deceleration ramp
+        print_verbose("[SAFETY] Initial 5s delay complete.", 2)
     except Exception as e:
-        print_verbose(f"[ERROR] Failed to send initial stop command: {e}", 2)
+        print_verbose(f"[ERROR] Failed to send initial stop command or wait: {e}", 2)
     # --- End Safety Stop ---
 
     # Start the task to wait for serial communication and show the manual
