@@ -1,0 +1,2672 @@
+Documentação Completa dos Parâmetros do CFW500 (V3.8X e Modbus RTU)
+
+Este documento detalha os parâmetros do inversor de frequência WEG CFW500, combinando informações do Manual de Programação V3.8X e do Manual do Usuário Modbus RTU.
+
+Notas Gerais:
+
+Acesso via Modbus: A maioria dos parâmetros é acessível via Modbus RTU como Holding Registers (16 bits), onde o endereço Modbus geralmente corresponde ao número do parâmetro (Ex: P0308 é o Holding Register 308).
+
+Propriedades:
+
+ro: Somente Leitura (Read Only).
+
+cfg: Configuração (geralmente alterável com motor parado).
+
+sy: Parâmetro relacionado à Segurança Funcional (STO/SS1-t).
+
+V/f, VVW, VVW PM, Vetorial, Sless, Enc: Indica os modos de controle do motor em que o parâmetro é visível/aplicável.
+
+-: Parâmetro de escrita/leitura ou comando.
+
+Grupos HMI: Indica o grupo de menu na Interface Homem-Máquina.
+
+Padrão: Valor de fábrica. Valores entre parênteses ( ) geralmente indicam o padrão para 50 Hz.
+
+Parâmetros Principais e de Leitura (Grupo HMI: READ, BASIC, etc.)
+
+P0000 – Acesso aos Parâmetros
+
+Faixa de Valores: 0 a 9999
+
+Padrão: 0
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Usado para inserir a senha (definida em P0200) e liberar o acesso à alteração de parâmetros. Valor 1 libera, 0 bloqueia (após ajuste, volta a indicar 1 ou 0).
+
+P0001 – Referência Velocidade
+
+Faixa de Valores: 0 a 65535
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Valor da referência de velocidade atual na unidade/escala definida por P0208-P0213.
+
+P0002 – Velocidade de Saída (Motor)
+
+Faixa de Valores: 0 a 65535
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Indica a velocidade imposta na saída do inversor (antes de compensações) na mesma escala/unidade de P0001.
+
+P0003 – Corrente do Motor
+
+Faixa de Valores: 0,0 a 400,0 A
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Indica a corrente de saída total RMS do inversor em Amperes.
+
+P0004 – Tensão Link DC (Ud)
+
+Faixa de Valores: 0 a 2000 V
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Indica a tensão no barramento de corrente contínua (Link DC) em Volts.
+
+P0005 – Frequência de Saída (Motor)
+
+Faixa de Valores: 0,0 a 500,0 Hz
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Indica a frequência real instantânea aplicada ao motor em Hertz (Hz), incluindo compensações.
+
+P0006 – Estado do Inversor
+
+Faixa de Valores: 0=Ready, 1=Run, 2=Subtensão, 3=Falha, 4=Autoajuste, 5=Configuração, 6=Frenagem CC, 7=STO, 8=Fire Mode, 9=Reservado, 10=Modo dormir
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Indica o estado atual de operação do inversor.
+
+P0007 – Tensão de Saída
+
+Faixa de Valores: 0 a 2000 V
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Indica a tensão de linha na saída do inversor (referência ou estimada) em Volts.
+
+P0009 – Torque no Motor
+
+Faixa de Valores: -1000,0 a 1000,0 %
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Indica o torque desenvolvido pelo motor em relação ao torque nominal (calculado).
+
+P0010 – Potência de Saída
+
+Faixa de Valores: 0,0 a 6553,5 kW
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Indica a potência elétrica na saída do inversor (calculada).
+
+P0011 – Fator de Potência
+
+Faixa de Valores: -1,00 a 1,00
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Indica o fator de potência (relação entre potência ativa e aparente) absorvido pelo motor.
+
+P0012 – Estado das Entradas Digitais DI8 a DI1
+
+Faixa de Valores: Bitmap (00h a FFh)
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ, I/O
+
+Descrição: Indica o estado (0=Inativa, 1=Ativa) de cada entrada digital (DI1 no Bit 0 até DI8 no Bit 7).
+
+P0013 – Estado das Saídas Digitais DO5 a DO1
+
+Faixa de Valores: Bitmap (00h a 1Fh)
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ, I/O
+
+Descrição: Indica o estado (0=Inativa/Aberta, 1=Ativa/Fechada) de cada saída digital (DO1 no Bit 0 até DO5 no Bit 4).
+
+P0014/P0015 – Valor da Saída Analógica AO1/AO2
+
+Faixa de Valores: 0,0 a 100,0 %
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ, I/O
+
+Descrição: Indicam o valor percentual atual das saídas analógicas AO1 e AO2, após ganho.
+
+P0016/P0017 – Valor da Saída em Frequência FO em % / Hz
+
+Faixa de Valores: 0,0 a 100,0 % / 0 a 20000 Hz
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ, I/O
+
+Descrição: Indicam o valor percentual (P0016) ou em Hertz (P0017) da saída em frequência (FO).
+
+P0018/P0019/P0020 – Valor da Entrada Analógica AI1/AI2/AI3
+
+Faixa de Valores: -100,0 a 100,0 %
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ, I/O
+
+Descrição: Indicam o valor percentual das entradas analógicas AI1, AI2 e AI3, após offset e ganho.
+
+P0021/P0022 – Valor da Entrada em Frequência FI em % / Hz
+
+Faixa de Valores: -100,0 a 100,0 % / 0 a 20000 Hz
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ, I/O
+
+Descrição: Indicam o valor percentual (P0021) ou em Hertz (P0022) da entrada em frequência (FI), após offset e ganho.
+
+P0023/P0024 – Versão de Software Principal/Secundário
+
+Faixa de Valores: 0,00 a 655,35
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Indicam as versões do firmware principal (cartão de controle) e secundário (módulo plug-in).
+
+P0027 – Configuração do Módulo Plug-in
+
+Faixa de Valores: 0 a 17 (ver Tabela 6.1 no manual)
+
+Padrão: - (Depende do módulo)
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Identifica o tipo de módulo plug-in conectado.
+
+P0028 – Módulo de Funções de Segurança
+
+Faixa de Valores: 0=Jumper STO, 1=CFW500-SFY2
+
+Padrão: - (Depende do módulo)
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Identifica se o módulo de segurança SFY2 está instalado.
+
+P0029 – Configuração do Hardware de Potência
+
+Faixa de Valores: 0 a 60 (Ver lista no manual)
+
+Padrão: Conforme modelo
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Identifica o modelo de hardware de potência (tensão/corrente) do inversor.
+
+P0030 – Temperatura do Módulo de Potência
+
+Faixa de Valores: -20 a 150 ºC
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Temperatura medida no dissipador do módulo de potência via NTC.
+
+P0034 – Temperatura do Ar Interno
+
+Faixa de Valores: -20 a 150 ºC
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Temperatura interna do ar dentro do inversor.
+
+P0036 – Velocidade do Ventilador Int.
+
+Faixa de Valores: 0 a 15000 rpm
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Velocidade atual do ventilador interno do dissipador.
+
+P0037 – Sobrecarga do Motor Ixt
+
+Faixa de Valores: 0 a 100 %
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Nível percentual atual do integrador Ixt da proteção de sobrecarga térmica do motor. 100% = falha F0072.
+
+P0038 – Velocidade do Encoder
+
+Faixa de Valores: 0 a 65535 rpm
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Velocidade lida do encoder (se modo vetorial com encoder ativo).
+
+P0039 – Contador dos Pulsos do Encoder
+
+Faixa de Valores: 0 a 40000
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Contagem de pulsos do encoder (se modo vetorial com encoder ativo).
+
+P0040 – Variável de Processo PID
+
+Faixa de Valores: 0,0 a 3000,0
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Valor atual da variável de processo (realimentação) do regulador PID, na escala P0528/P0529.
+
+P0041 – Valor do Setpoint PID
+
+Faixa de Valores: 0,0 a 3000,0
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Valor atual do setpoint (referência) do regulador PID, na escala P0528/P0529.
+
+P0042 – Tempo Energizado
+
+Faixa de Valores: 0 a 65535 h
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Tempo total em que o inversor permaneceu energizado (não reseta com P0204=3).
+
+P0043 – Tempo Ativado
+
+Faixa de Valores: 0,0 a 6553,5 h
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Tempo total em que o inversor esteve habilitado (motor rodando ou em frenagem CC). Reseta com P0204=3.
+
+P0044 – Contador de kWh
+
+Faixa de Valores: 0 a 65535 kWh
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Energia consumida pelo motor (calculada, não para medição fiscal). Reseta com P0204=4.
+
+P0047 – Estado CONFIG
+
+Faixa de Valores: 0 a 999
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Indica o motivo específico pelo qual o inversor entrou no estado de Configuração (parâmetros incompatíveis). Ver Tabela 0.1.
+
+P0048 – Alarme Atual
+
+Faixa de Valores: 0 a 999
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Indica o número do alarme ativo no momento. 0 = Sem alarme.
+
+P0049/P0050/P0060/P0070 – Falha Atual / Última / Segunda / Terceira Falha
+
+Faixa de Valores: 0 a 999
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Histórico das 3 últimas falhas ocorridas e a falha atual (se houver).
+
+P0051/P0061/P0071 – Corrente de Saída Última / Segunda / Terceira Falha
+
+Faixa de Valores: 0,0 a 400,0 A
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Corrente de saída no instante das 3 últimas falhas.
+
+P0052/P0062/P0072 – Link DC Última / Segunda / Terceira Falha
+
+Faixa de Valores: 0 a 2000 V
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Tensão do Link DC no instante das 3 últimas falhas.
+
+P0053/P0063/P0073 – Frequência de Saída Última / Segunda / Terceira Falha
+
+Faixa de Valores: 0,0 a 500,0 Hz
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Frequência de saída no instante das 3 últimas falhas.
+
+P0054/P0064/P0074 – Temperatura nos IGBTs Última / Segunda / Terceira Falha
+
+Faixa de Valores: -20 a 150 ºC
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Temperatura do módulo de potência no instante das 3 últimas falhas.
+
+P0055/P0065/P0075 – Estado Lógico Última / Segunda / Terceira Falha
+
+Faixa de Valores: 0000h a FFFFh
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Estado lógico (P0680) no instante das 3 últimas falhas.
+
+P0080/P0081/P0082 – Última / Segunda / Terceira Falha em "Fire Mode"
+
+Faixa de Valores: 0 a 999
+
+Padrão: 0
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Histórico das 3 últimas falhas ocorridas durante a operação em "Fire Mode".
+
+Parâmetros de Rampas (Grupo HMI: BASIC, I/O)
+
+P0100/P0101 – Tempo Aceleração/Desaceleração 1
+
+Faixa de Valores: 0,1 a 999,0 s
+
+Padrão: 10,0 s (Alterado para 20,0 s nas mecânicas F/G)
+
+Propriedades: -
+
+Grupos de Acesso via HMI: BASIC
+
+Descrição: Define os tempos da 1ª rampa (padrão) para ir de 0 a P0134 (acel) e de P0134 a 0 (desacel).
+
+P0102/P0103 – Tempo Aceleração/Desaceleração 2ª Rampa
+
+Faixa de Valores: 0,1 a 999,0 s
+
+Padrão: 10,0 s (Alterado para 20,0 s nas mecânicas F/G)
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define os tempos da 2ª rampa, ativada via P0105.
+
+P0104 – Rampa S
+
+Faixa de Valores: 0=Inativa, 1=Ativa
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Habilita/desabilita o perfil de rampa em "S" para suavizar acelerações/desacelerações.
+
+P0105 – Seleção 1ª/2ª Rampa
+
+Faixa de Valores: 0=1ª Rampa, 1=2ª Rampa, 2=DIx, 3=Serial/USB, 4=Reservado, 5=CO/DN/PB/Eth, 6=SoftPLC
+
+Padrão: 2
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define a fonte que selecionará entre a 1ª e a 2ª rampa.
+
+P0106 – Tempo da 3ª Rampa
+
+Faixa de Valores: 0,1 a 999,0 s
+
+Padrão: 5,0 s
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Tempo de aceleração/desaceleração usado por funções de proteção (Limitação de Corrente, Regulação Link DC, Parada Rápida, SS1-t).
+
+Parâmetros de Segurança Funcional
+
+P0108 – Tempo SS1-t
+
+Faixa de Valores: 0 a 999 s
+
+Padrão: -
+
+Propriedades: sy
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define o tempo de atraso para a função Safe Stop 1 (SS1-t) no módulo de segurança.
+
+P0109 – Confirmação Tempo SS1-t
+
+Faixa de Valores: 0 a 999 s
+
+Padrão: -
+
+Propriedades: ro, sy
+
+Grupos de Acesso via HMI: -
+
+Descrição: Mostra o tempo SS1-t real programado no módulo de segurança para confirmação.
+
+Parâmetros de Referência de Velocidade (Grupo HMI: BASIC, I/O, etc.)
+
+P0120 – Backup da Ref. Veloc.
+
+Faixa de Valores: 0=Inativo, 1=Ativo, 2=Backup por P0121
+
+Padrão: 1
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define se a última referência de velocidade é salva ao desabilitar ou desligar (Ativo), se volta para P0133 (Inativo), ou se sempre parte de P0121 (Backup por P0121).
+
+P0121 – Referência via HMI
+
+Faixa de Valores: 0,0 a 500,0 Hz
+
+Padrão: 3,0 Hz
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Armazena o valor da referência ajustada pelas teclas da HMI.
+
+P0122 – Referência JOG
+
+Faixa de Valores: -500,0 a 500,0 Hz
+
+Padrão: 5,0 Hz
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define a velocidade para a função JOG.
+
+P0124 a P0131 – Referência 1 a 8 Multispeed
+
+Faixa de Valores: -500,0 a 500,0 Hz
+
+Padrões: 3.0, 10.0(5.0), 20.0(10.0), 30.0(20.0), 40.0(30.0), 50.0(40.0), 60.0(50.0), 66.0(55.0) Hz
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define os 8 níveis de velocidade para a função Multispeed.
+
+P0132 – Nivel Máx. Sobreveloc
+
+Faixa de Valores: 0 a 100 %
+
+Padrão: 10 %
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: BASIC
+
+Descrição: Percentual acima de P0134 que, se excedido por 20ms, causa falha F0150. 100% desabilita.
+
+P0133 – Velocidade Mínima
+
+Faixa de Valores: 0,0 a 500,0 Hz
+
+Padrão: 3,0 Hz
+
+Propriedades: -
+
+Grupos de Acesso via HMI: BASIC
+
+Descrição: Limite mínimo para a referência de velocidade.
+
+P0134 – Velocidade Máxima
+
+Faixa de Valores: 0,0 a 500,0 Hz
+
+Padrão: 66,0 (55,0) Hz
+
+Propriedades: -
+
+Grupos de Acesso via HMI: BASIC
+
+Descrição: Limite máximo para a referência de velocidade. Base para cálculo das rampas.
+
+
+Parâmetros de Controle do Motor (Grupo HMI: BASIC, MOTOR, etc.)
+
+P0135 – Corrente Máxima Saída
+
+Faixa de Valores: 0,0 a 400,0 A
+
+Padrão: 1,5x Inom
+
+Propriedades: V/f, VVW, VVW PM
+
+Grupos de Acesso via HMI: BASIC, MOTOR
+
+Descrição: Nível de corrente para ativar a limitação de corrente (Modos Hold de Rampa ou Desacelera Rampa em P0150).
+
+P0136 – Boost de Torque Manual
+
+Faixa de Valores: 0,0 a 30,0 %
+
+Padrão: Conforme modelo
+
+Propriedades: V/f, VVW PM
+
+Grupos de Acesso via HMI: BASIC, MOTOR
+
+Descrição: Aumenta a tensão de saída em baixas frequências (0 a P0147) para compensar queda de tensão e manter torque.
+
+P0137 – Boost de Torque Autom.
+
+Faixa de Valores: 0,0 a 30,0 %
+
+Padrão: 0,0 %
+
+Propriedades: V/f
+
+Grupos de Acesso via HMI: MOTOR
+
+Descrição: Boost de torque proporcional à corrente ativa (similar ao P0136).
+
+P0138 – Compensação Escorreg.
+
+Faixa de Valores: -10,0 a 10,0 %
+
+Padrão: 0,0 %
+
+Propriedades: V/f
+
+Grupos de Acesso via HMI: MOTOR
+
+Descrição: Compensa o escorregamento do motor, aumentando a frequência de saída com o aumento da corrente ativa, para manter velocidade constante com carga.
+
+P0139 – Filtro Corrente Saída
+
+Faixa de Valores: 0 a 9999 ms
+
+Padrão: 50 ms
+
+Propriedades: V/f, VVW
+
+Grupos de Acesso via HMI: -
+
+Descrição: Constante de tempo do filtro para a corrente de saída total e ativa.
+
+P0140 – Filtro Comp. Escorreg.
+
+Faixa de Valores: 0 a 9999 ms
+
+Padrão: 500 ms
+
+Propriedades: VVW
+
+Grupos de Acesso via HMI: -
+
+Descrição: Constante de tempo do filtro para a compensação de escorregamento (usada no controle VVW).
+
+P0142/P0143/P0144 – Tensão Saída Máxima / Intermediária / Mínima
+
+Faixa de Valores: 0,0 a 100,0 %
+
+Padrões: 100,0%, 66,7%, 33,3%
+
+Propriedades: cfg, V/f, VVW PM
+
+Grupos de Acesso via HMI: -
+
+Descrição: Definem os níveis de tensão (% da tensão nominal) nos pontos P3, P2 e P1 da curva V/f, respectivamente.
+
+P0145/P0146/P0147 – Freq. Início Enf. Campo / Saída Intermed. / Saída Baixa
+
+Faixa de Valores: 0,0 a 500,0 Hz
+
+Padrões: 60(50) Hz, 40(33.3) Hz, 20(16.7) Hz
+
+Propriedades: cfg, V/f, VVW PM
+
+Grupos de Acesso via HMI: -
+
+Descrição: Definem as frequências correspondentes aos pontos P3, P2 e P1 da curva V/f, respectivamente. P0145 é a frequência nominal.
+
+P0148 – Ação do V/f
+
+Faixa de Valores: 0=V/f padrão, 1=Soft-Starter (tensão)
+
+Padrão: 0
+
+Propriedades: cfg, V/f, VVW PM
+
+Grupos de Acesso via HMI: -
+
+Descrição: 0: Controle V/f normal. 1: Soft-Starter - varia apenas tensão, frequência fixa (P0001).
+
+P0150 – Tipo Regul. Link DC V/f
+
+Faixa de Valores: 0=Hold_Ud/Desac_LC, 1=Acel_Ud/Desac_LC, 2=Hold_Ud/Hold_LC, 3=Acel_Ud/Hold_LC
+
+Padrão: 0
+
+Propriedades: cfg, V/f, VVW
+
+Grupos de Acesso via HMI: MOTOR
+
+Descrição: Configura como a rampa reage à limitação de tensão do Link DC (Ud) e Limitação de Corrente (LC). (Hold=congela, Acel=acelera, Desac=desacelera).
+
+P0151 – Nível Regul. Ud V/f
+
+Faixa de Valores: 339 a 1200 V
+
+Padrão: Depende de P0296 (Ver Tabela 9.1)
+
+Propriedades: V/f, VVW, VVW PM
+
+Grupos de Acesso via HMI: -
+
+Descrição: Nível de tensão do Link DC para ativar a regulação (conforme P0150).
+
+P0152 – Ganho Prop. Regul. Ud V/f
+
+Faixa de Valores: 0,00 a 9,99
+
+Padrão: 1,50
+
+Propriedades: V/f, VVW, VVW PM
+
+Grupos de Acesso via HMI: -
+
+Descrição: Ganho proporcional para o modo "Acelera Rampa" (P0150=1 ou 3) da regulação do Link DC.
+
+P0153 – Nível Frenagem Reost.
+
+Faixa de Valores: 339 a 1200 V
+
+Padrão: Depende de P0296 (Ex: 375V para 200-240Vca)
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Nível de tensão do Link DC para ativar o IGBT de frenagem (requer resistor externo).
+
+P0156/P0157/P0158 – Corr. Sobrecarga 100% / 50% / 20%
+
+Faixa de Valores: 0,0 a 400,0 A
+
+Padrões: 1,1xInom, 1,0xInom, 0,8xInom
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Níveis de corrente para acionar a proteção de sobrecarga térmica do motor (Ixt), dependendo da velocidade (acima 50%, entre 20-50%, abaixo 20%).
+
+P0161/P0162/P0166 – Ganho Prop./Integral/Difer. Veloc.
+
+Faixa de Valores: 0.0-63.9 / 0.000-9.999 / 0.00-7.99
+
+Padrões: 7.0 / 0.005 / 0.00
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: -
+
+Descrição: Ganhos do regulador de velocidade no controle vetorial.
+
+P0165 – Filtro de Velocidade
+
+Faixa de Valores: 0,012 a 1,000 s
+
+Padrão: 0,012 s
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: -
+
+Descrição: Constante de tempo do filtro aplicado à velocidade (real ou estimada).
+
+P0167/P0168 – Ganho Prop./Integ. Corrente
+
+Faixa de Valores: 0.00-1.99 / 0.000-1.999
+
+Padrões: 0.50 / 0.010
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: -
+
+Descrição: Ganhos do regulador de corrente no controle vetorial.
+
+P0169/P0170 – Máx.Corrente Torque + / -
+
+Faixa de Valores: 0,0 a 350,0 %
+
+Padrão: 125,0 %
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: BASIC
+
+Descrição: Limites percentuais da corrente de torque para operação em modo torque (sentido horário/anti-horário).
+
+P0175/P0176 – Ganho Propor./Integral Fluxo
+
+Faixa de Valores: 0.0-31.9 / 0.000-9.999
+
+Padrões: 2.0 / 0.020
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: -
+
+Descrição: Ganhos do regulador de fluxo no controle vetorial.
+
+P0178 – Fluxo Nominal
+
+Faixa de Valores: 0,0 a 150,0 %
+
+Padrão: 100,0 %
+
+Propriedades: VVW (e V/f para ajuste de tensão)
+
+Grupos de Acesso via HMI: -
+
+Descrição: Referência de fluxo nominal (% do fluxo nominal do motor) no modo VVW.
+
+P0179 – Sobre-Modulação
+
+Faixa de Valores: 100,0 a 110,0%
+
+Padrão: 100,0 %
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Permite elevar a tensão de saída atuando na sobremodulação (acima de 100%).
+
+P0181 – Modo de Magnetização
+
+Faixa de Valores: 0=Habilita Geral, 1=Gira/Para
+
+Padrão: 0
+
+Propriedades: cfg, Enc
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define quando a corrente de magnetização é aplicada no modo vetorial com encoder.
+
+P0182 – Veloc. p/ Atuação I/f
+
+Faixa de Valores: 0 a 180 rpm
+
+Padrão: 30 rpm
+
+Propriedades: Sless
+
+Grupos de Acesso via HMI: MOTOR
+
+Descrição: Velocidade abaixo da qual o controle vetorial sensorless comuta para o modo I/f (corrente imposta). ≤ 3 rpm desativa I/f.
+
+P0183 – Corrente no Modo I/f
+
+Faixa de Valores: 15,0 a 300,0 %
+
+Padrão: 120,0 %
+
+Propriedades: Sless
+
+Grupos de Acesso via HMI: MOTOR
+
+Descrição: Percentual da corrente de magnetização (P0410) aplicada no modo I/f.
+
+P0184 – Modo Regulação Ud
+
+Faixa de Valores: 0=Com Perdas, 1=Sem Perdas, 2=Hab/Desab.DIx
+
+Padrão: 1
+
+Propriedades: cfg, Vetorial
+
+Grupos de Acesso via HMI: MOTOR
+
+Descrição: 0: Frenagem Ótima ativa. 1: Frenagem Ótima inativa (regulação normal do Link DC). 2: DIx seleciona entre 0 e 1.
+
+P0185 – Nível Regulação Ud
+
+Faixa de Valores: 339 a 1000 V (Vetorial c/ Encoder: 339 a 1200 V)
+
+Padrão: Depende de P0296 (Ver Tabela 12.8)
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: -
+
+Descrição: Nível de tensão do Link DC para ativar a regulação durante a frenagem (conforme P0184).
+
+P0186/P0187 – Ganho Proporcional/Integral Ud
+
+Faixa de Valores: 0.0-63.9 / 0.000-9.999
+
+Padrões: 18.0 / 0.002
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: -
+
+Descrição: Ganhos do regulador de tensão do Link DC (usado em P0184=1 ou 2).
+
+P0188/P0189 – Ganho Prop./Integ. V. Saída
+
+Faixa de Valores: 0.000-7.999 / 0.000-7.999
+
+Padrões: 0.200 / 0.001
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: -
+
+Descrição: Ganhos do regulador de tensão de saída (usado no controle I/f).
+
+P0190 – Tensão Saída Máxima
+
+Faixa de Valores: 0 a 600 V
+
+Padrão: P0400
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: -
+
+Descrição: Tensão máxima de saída no modo vetorial.
+
+Parâmetros HMI (Relógio, Senha, Display, etc. - Grupo HMI: HMI)
+
+P0193 a P0199 – Dia da Semana, Dia, Mês, Ano, Hora, Minutos, Segundos
+
+Descrição: Parâmetros para ajuste do relógio de tempo real (usado com HMI Alfanumérica e funções SoftPLC).
+
+P0200 – Senha
+
+Faixa de Valores: 0=Inativa, 1=Ativa, 1-9999=Nova Senha
+
+Padrão: 0
+
+Propriedades: -
+
+Grupos de Acesso via HMI: HMI
+
+Descrição: Ativa/desativa ou define a senha de acesso (inserida em P0000).
+
+P0201 – Idioma
+
+Faixa de Valores: 0=Português, 1=Inglês, 2=Espanhol
+
+Padrão: 0
+
+Propriedades: -
+
+Grupos de Acesso via HMI: HMI
+
+Descrição: Define o idioma da HMI Alfanumérica Remota.
+
+P0205/P0206/P0207 – Seleção Parâmetro Display Principal/Secundário/Barra Gráfica
+
+Faixa de Valores: 0 a 1500
+
+Padrões: 2 / 1 / 3
+
+Propriedades: -
+
+Grupos de Acesso via HMI: HMI
+
+Descrição: Selecionam quais parâmetros serão exibidos na HMI no modo monitoração.
+
+P0208 – Escala da Referência
+
+Faixa de Valores: 1 a 65535
+
+Padrão: 600 (500)
+
+Propriedades: -
+
+Grupos de Acesso via HMI: HMI
+
+Descrição: Define o fundo de escala para P0001/P0002 correspondente à frequência nominal (P0403).
+
+P0209 – Unidade Eng. Ref.
+
+Faixa de Valores: 0 a 58 (Ver lista no manual)
+
+Padrão: 13 (Hz)
+
+Propriedades: -
+
+Grupos de Acesso via HMI: HMI
+
+Descrição: Seleciona a unidade de engenharia para exibição de P0001/P0002.
+
+P0210 – Forma Indicação Ref.
+
+Faixa de Valores: 0=wxyz, 1=wxy.z, 2=wx.yz, 3=w.xyz
+
+Padrão: 1
+
+Propriedades: -
+
+Grupos de Acesso via HMI: HMI
+
+Descrição: Define a posição do ponto decimal para P0001/P0002.
+
+P0213 – Fator Escala da Barra
+
+Faixa de Valores: 1 a 65535
+
+Padrão: Conforme modelo
+
+Propriedades: -
+
+Grupos de Acesso via HMI: HMI
+
+Descrição: Define o fundo de escala (100%) para o parâmetro exibido na barra gráfica (P0207).
+
+P0215 – Seleção HMI Remota
+
+Faixa de Valores: 0=Segmentada, 1=Alfanumérica
+
+Padrão: 0
+
+Propriedades: -
+
+Grupos de Acesso via HMI: HMI
+
+Descrição: Define o tipo de HMI remota conectada.
+
+P0216 – Iluminação HMI
+
+Faixa de Valores: 0=Desliga, 1=Liga
+
+Padrão: 1
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: HMI
+
+Descrição: Liga/desliga a iluminação de fundo (backlight) do display LCD.
+
+Parâmetros de Seleção de Comando e Referência (Grupo HMI: I/O)
+
+P0220 – Seleção LOC/REM
+
+Faixa de Valores: 0=Sempre Local, 1=Sempre Remoto, 2=Tecla HMI(LOC), 3=Tecla HMI(REM), 4=DIx, 5=Serial/USB(LOC), 6=Serial/USB(REM), ..., 11=SoftPLC
+
+Padrão: 2
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define a fonte que selecionará entre o modo de operação Local e Remoto.
+
+P0221/P0222 – Sel. Referência LOC/REM
+
+Faixa de Valores: 0=Teclas HMI, 1=AI1, 2=AI2, ..., 9=Serial/USB, ..., 12=SoftPLC, etc.
+
+Padrões: P0221=0, P0222=1
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define a fonte da referência de velocidade para os modos Local e Remoto.
+
+P0223/P0226 – Seleção Giro LOC/REM
+
+Faixa de Valores: 0=Horário, 1=Anti-horário, 2=Tecla HMI(H), 3=Tecla HMI(AH), 4=DIx, 5=Serial/USB(H), ..., 12=SoftPLC
+
+Padrões: P0223=2, P0226=4
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define a fonte do comando de sentido de giro para os modos Local e Remoto.
+
+P0224/P0227 – Seleção Gira/Para LOC/REM
+
+Faixa de Valores: 0=Tecla HMI, 1=DIx, 2=Serial/USB, 3=Sem Função, 4=CO/DN/PB/Eth, 5=SoftPLC
+
+Padrões: P0224=0, P0227=1
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define a fonte do comando Gira/Para para os modos Local e Remoto.
+
+P0225/P0228 – Seleção JOG LOC/REM
+
+Faixa de Valores: 0=Inativo, 1=Teclas HMI, 2=DIx, 3=Serial/USB, ..., 6=SoftPLC
+
+Padrões: P0225=1, P0228=2
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define a fonte do comando JOG para os modos Local e Remoto.
+
+P0229 – Seleção Modo Parada
+
+Faixa de Valores: 0=Por Rampa, 1=Por Inércia, 2=Parada Rápida
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define como o motor para ao receber comando de parada (exceto parada rápida ou falha).
+
+
+Parâmetros de Entradas e Saídas (Grupo HMI: I/O) 
+
+P0230 – Zona Morta (AIs)
+
+Faixa de Valores: 0=Inativa, 1=Ativa
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Habilita uma zona morta no início da faixa das entradas analógicas usadas como referência de frequência (sinal abaixo de um limiar não altera a frequência de P0133).
+
+P0231/P0236/P0241 – Função do Sinal AI1/AI2/AI3
+
+Faixa de Valores: 0=Ref. Veloc., 1=Sem Função, 2=Max Corrente Torque, 3=Fluxo Nominal V/f, 4=PTC, ..., 7=Uso SoftPLC, 8-15=Funções Aplicação, 16-17=Fback PIDInt, 18=Fback PIDExt
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define a função de cada entrada analógica.
+
+P0232/P0237/P0242 – Ganho da Entrada AI1/AI2/AI3
+
+Faixa de Valores: 0,000 a 9,999
+
+Padrão: 1,000
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Fator de ganho aplicado ao sinal de cada entrada analógica.
+
+P0233/P0238/P0243 – Sinal da Entrada AI1/AI2/AI3
+
+Faixa de Valores: 0=0-10V/0-20mA, 1=4-20mA, 2=10-0V/20-0mA, 3=20-4mA, 4=-10 a +10V (somente AI3)
+
+Padrão: 0
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define o tipo e a faixa do sinal elétrico esperado em cada entrada analógica. Requer configuração da chave DIP correspondente.
+
+P0234/P0239/P0244 – Offset da Entrada AI1/AI2/AI3
+
+Faixa de Valores: -100,0 a 100,0 %
+
+Padrão: 0,0 %
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Valor de offset (deslocamento) percentual aplicado ao sinal de cada entrada analógica.
+
+P0235/P0240/P0245 – Filtro da Entrada AI1/AI2/AI3 (e FI)
+
+Faixa de Valores: 0,00 a 16,00 s
+
+Padrão: 0,00 s
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Constante de tempo do filtro digital passa-baixas aplicado a cada entrada analógica (P0245 também filtra a Entrada em Frequência FI).
+
+P0246 – Entrada em Freq. FI
+
+Faixa de Valores: 0=Inativa, 1=Ativa, 2=DI2 Conta Pulso
+
+Padrão: 0
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Habilita/desabilita a DI2 como entrada em frequência (FI) ou como contador de pulsos para a SoftPLC.
+
+P0247 – Ganho da Entrada FI
+
+Faixa de Valores: 0,000 a 9,999
+
+Padrão: 1,000
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Fator de ganho aplicado ao sinal da entrada em frequência.
+
+P0248/P0250 – Entrada FI Mínima/Máxima
+
+Faixa de Valores: 10 a 20000 Hz
+
+Padrões: 10 Hz / 10000 Hz
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define a faixa de operação (frequência mínima e máxima) da entrada FI.
+
+P0249 – Offset da Entrada FI
+
+Faixa de Valores: -100,0 a 100,0 %
+
+Padrão: 0,0 %
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Valor de offset percentual aplicado ao sinal da entrada em frequência.
+
+P0251/P0254/P0257 – Função da Saída AO1/AO2/FO
+
+Faixa de Valores: 0=Ref. Veloc., ..., 5=Corrente Saída, ..., 11=Torque Motor, 12=SoftPLC, 16=Ixt Motor, 18-20=Conteúdo P069x, 21-28=Função Aplicação, 29=Saída PIDExt
+
+Padrões: P0251=2, P0254=5, P0257=15
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define qual variável interna do inversor será representada na saída analógica AOx ou na saída em frequência FO.
+
+P0252/P0255/P0258 – Ganho da Saída AO1/AO2/FO
+
+Faixa de Valores: 0,000 a 9,999
+
+Padrão: 1,000
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Fator de ganho aplicado ao sinal das saídas analógicas AOx ou saída em frequência FO.
+
+P0253/P0256 – Sinal da Saída AO1/AO2
+
+Faixa de Valores: 0=0-10V, 1=0-20mA, 2=4-20mA, 3=10-0V, 4=20-0mA, 5=20-4mA
+
+Padrão: 0
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define o tipo e a faixa do sinal elétrico nas saídas analógicas AOx. Requer configuração da chave DIP correspondente.
+
+P0259/P0260 – Saída FO Mínima/Máxima
+
+Faixa de Valores: 10 a 20000 Hz
+
+Padrões: 10 Hz / 10000 Hz
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define a faixa de operação (frequência mínima e máxima) da saída em frequência FO.
+
+P0263 a P0270 – Função da Entrada DI1 a DI8
+
+Faixa de Valores: 0 a 53 (Ver Tabela 14.7)
+
+Padrões: P0263=1, P0264=8, P0265=20, P0266=10, P0267-P0270=0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define a função específica de cada entrada digital.
+
+P0271 – Sinal das DIs
+
+Faixa de Valores: 0=(DI1-DI8)NPN, 1=(DI1)PNP, ..., 8=(DI1-DI8)PNP
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Configura o tipo de lógica (NPN ou PNP) para as entradas digitais.
+
+P0275 a P0279 – Função da Saída DO1 a DO5
+
+Faixa de Valores: 0 a 52 (Ver Tabela 14.8)
+
+Padrões: P0275=13, P0276=2, P0277/8/9=0
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define a função lógica que controlará cada saída digital (relé ou transistor).
+
+P0287 – Histerese Fx
+
+Faixa de Valores: 0,0 a 10,0 Hz
+
+Padrão: 0,5 Hz
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define a histerese para as funções de saída digital baseadas em comparação de frequência (F>Fx, F<Fx, etc.).
+
+P0288 – Velocidade Fx
+
+Faixa de Valores: 0,0 a 500,0 Hz
+
+Padrão: 3,0 Hz
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define o nível de frequência (Fx) para as funções de saída digital baseadas em comparação de frequência.
+
+P0290 – Corrente Ix
+
+Faixa de Valores: 0,0 a 400,0 A
+
+Padrão: 1,0 x Inom
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define o nível de corrente (Ix) para as funções de saída digital baseadas em comparação de corrente (Is>Ix, Is<Ix).
+
+P0293 – Torque Tx
+
+Faixa de Valores: 0 a 200 %
+
+Padrão: 100 %
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Define o nível de torque (Tx) para as funções de saída digital baseadas em comparação de torque (Torque>Tx, Torque<Tx).
+
+Parâmetros Gerais e de Motor (Grupo HMI: STARTUP, MOTOR)
+
+P0295 – Corr. Nom. Inv.
+
+Faixa de Valores: 0,0 a 400,0 A
+
+Padrão: Conforme modelo
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Corrente nominal do inversor (para regime ND ou HD, conforme P0298).
+
+P0296 – Tensão Nominal Rede
+
+Faixa de Valores: 0=200-240V, ..., 7=600V
+
+Padrão: Conforme modelo
+
+Propriedades: ro, cfg (alterável no Startup)
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Tensão nominal da rede de alimentação do inversor.
+
+P0297 – Freq. de Chaveamento
+
+Faixa de Valores: 2500 a 15000 Hz
+
+Padrão: 5000 Hz
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Frequência de chaveamento dos IGBTs. Afeta ruído acústico, perdas e corrente máxima.
+
+P0298 – Aplicação
+
+Faixa de Valores: 0=Uso Normal (ND), 1=Uso Pesado (HD)
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define o regime de sobrecarga (Normal Duty ou Heavy Duty), afetando P0295 e proteções.
+
+P0340 – Tempo Auto-Reset
+
+Faixa de Valores: 0 a 255 s
+
+Padrão: 0 s
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define o tempo após uma falha (habilitada em P0343) para o inversor tentar um reset automático. 0 = desabilitado.
+
+P0343 – Máscara Falha/Alarme
+
+Faixa de Valores: Bitmap (0000h a FFFFh)
+
+Padrão: 008Fh
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Permite desabilitar falhas específicas para a função Auto-Reset (Bit=0 desabilita a falha correspondente).
+
+P0345 – Parada Prioritária HMI
+
+Faixa de Valores: 0=Inativo, 1=Ativo
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Quando ativa, a tecla PARAR da HMI tem prioridade sobre outras fontes de comando para parar o motor.
+
+P0349 – Nível para Alarme Ixt
+
+Faixa de Valores: 70 a 100 %
+
+Padrão: 85 %
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Nível percentual da sobrecarga Ixt (motor ou IGBT) para gerar o alarme A0046 ou A0047.
+
+P0352 – Config. do Ventilador Dissipador
+
+Faixa de Valores: 0=Sempre Desligado, 1=Sempre Ligado, 2=Controle 60ºC, ..., 6=Controle RUN+60s
+
+Padrão: 4
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define como o ventilador do dissipador opera (baseado em temperatura, estado RUN ou combinação).
+
+P0357 – Tempo Falta Fase Rede
+
+Faixa de Valores: 0 a 60 s
+
+Padrão: Conforme Modelo
+
+Propriedades: cfg e Encode
+
+Grupos de Acesso via HMI: -
+
+Descrição: Tempo para indicar falha F0006 (Falta de Fase na Rede). 0 desabilita.
+
+P0360 – Histerese de Velocidade
+
+Faixa de Valores: 0,0 a 100,0 %
+
+Padrão: 10,0 %
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define a diferença percentual máxima permitida entre velocidade real e referência antes de gerar alarme A0168.
+
+P0361 – Tempo com Velocidade Diferente da Referência
+
+Faixa de Valores: 0,0 a 999,0 s
+
+Padrão: 0,0 s
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: -
+
+Descrição: Tempo que a condição de alarme A0168 (velocidade diferente da referência) deve persistir para gerar a falha F0169. 0.0s desabilita a falha.
+
+Parâmetros de Controle do Motor (Grupo HMI: STARTUP, MOTOR) 
+
+P0397 – Configuração do Controle
+
+Faixa de Valores: Bitmap (0000h a FFFFh)
+
+Padrão: 002Fh
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Parâmetro de configuração avançada com bits para: Comp. Escorreg. Regen (Bit0), Comp. Tempo Morto (Bit1), Estabilização de Is (Bit2), Red. P0297 em A0050 (Bit3), Comp. Ud VVW PM (Bit5), Borda STO/Falha (Bit6). Não alterar sem conhecimento.
+
+P0398 – Fator Serviço Motor
+
+Faixa de Valores: 1,00 a 1,50
+
+Padrão: 1,00
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Fator de serviço do motor (da placa). Usado na proteção de sobrecarga.
+
+P0399 – Rendimento Nom. Motor
+
+Faixa de Valores: 50,0 a 99,9 %
+
+Padrão: 75,0 %
+
+Propriedades: cfg, VVW
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Rendimento nominal do motor (da placa). Usado no controle VVW.
+
+P0400 – Tensão Nom. Motor
+
+Faixa de Valores: 200 a 600 V
+
+Padrão: Depende de P0296
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Tensão nominal do motor (da placa).
+
+P0401 – Corrente Nom. Motor
+
+Faixa de Valores: 0,0 a 400,0 A
+
+Padrão: 1,0 x Inom
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Corrente nominal do motor (da placa). Base para proteções e controle.
+
+P0402 – Rotação Nom. Motor
+
+Faixa de Valores: 0 a 30000 rpm
+
+Padrão: 1710 (1425) rpm
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Rotação nominal do motor (da placa).
+
+P0403 – Frequência Nom. Motor
+
+Faixa de Valores: 0 a 500 Hz
+
+Padrão: 60 (50) Hz
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Frequência nominal do motor (da placa). Base para escala de 13 bits (P0681/P0683).
+
+P0404 – Potência Nom. Motor
+
+Faixa de Valores: 0 a 27 (Códigos HP/kW - ver lista manual)
+
+Padrão: Conforme modelo
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Potência nominal do motor (da placa). Seleciona código mais próximo.
+
+P0405 – Número Pulsos Encoder
+
+Faixa de Valores: 100 a 9999 ppr
+
+Padrão: 1024
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Número de pulsos por rotação (ppr) do encoder incremental (para controle vetorial com encoder).
+
+P0406 – Ventilação do Motor
+
+Faixa de Valores: 0=Autoventilado, 1=Independente
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Define o tipo de ventilação do motor, afetando a proteção de sobrecarga Ixt.
+
+P0407 – Fator de Potência Nominal do Motor
+
+Faixa de Valores: 0,50 a 0,99
+
+Padrão: 0,80
+
+Propriedades: cfg, V/f, VVW, VVW PM
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Fator de potência nominal do motor (da placa). Usado na função Economia de Energia (V/f) e controle VVW.
+
+P0408 – Autoajuste
+
+Faixa de Valores: 0=Não, 1=Sem Girar, 2=Girar p/ Im, 3=Girar p/ Tm, 4=Estimar Tm
+
+Padrão: 0
+
+Propriedades: cfg, VVW, Vetorial
+
+Grupos de Acesso via HMI: STARTUP
+
+Descrição: Inicia a rotina de autoajuste para estimar parâmetros do motor (Rs, Lσ, Tr, Im, Tm) necessários para os controles VVW e Vetorial.
+
+P0409 – Resistência do Estator (Rs)
+
+Faixa de Valores: 0,01 a 99,99 Ω
+
+Padrão: Conforme modelo
+
+Propriedades: V/f, cfg, VVW, Vetorial
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Resistência estatórica do motor por fase. Pode ser estimada via Autoajuste.
+
+P0410 – Corrente de Magnetização do Motor (Im)
+
+Faixa de Valores: 0,0 a 400,0 A
+
+Padrão: 0,0 A
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Corrente de magnetização nominal do motor. Pode ser estimada via Autoajuste.
+
+P0411 – Indutância de Dispersão de Fluxo do Motor (σls)
+
+Faixa de Valores: 0,00 a 99,99 mH
+
+Padrão: 0,00 mH
+
+Propriedades: cfg, Vetorial
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Indutância de dispersão total do motor (estator + rotor). Pode ser estimada via Autoajuste.
+
+P0412 – Constante Lr/Rr (Constante de Tempo Rotórica – Tr)
+
+Faixa de Valores: 0,000 a 9,999 s
+
+Padrão: 0,000 s
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Constante de tempo rotórica do motor. Pode ser estimada via Autoajuste.
+
+P0413 – Constante Tm (Constante de Tempo Mecânico)
+
+Faixa de Valores: 0,00 a 99,99 s
+
+Padrão: 0,00 s
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: MOTOR, STARTUP
+
+Descrição: Constante de tempo mecânica do conjunto motor+carga. Estimada via Autoajuste P0408=3 ou 4.
+
+Parâmetros de Controle VVW PM (Grupo HMI: MOTOR, STARTUP)
+
+P0431 – Número de Pólos
+
+Faixa de Valores: 2 a 48
+
+Padrão: 6
+
+Propriedades: cfg, VVW PM
+
+Grupos de Acesso via HMI: STARTUP
+
+Descrição: Define o número de pólos do motor de ímã permanente.
+
+P0435 – Constante Eletromotriz Ke
+
+Faixa de Valores: 0 a 6000 V/kRPM
+
+Padrão: 0
+
+Propriedades: VVW PM
+
+Grupos de Acesso via HMI: STARTUP
+
+Descrição: Constante da força contra-eletromotriz do motor de ímã permanente.
+
+P0445 – Ajuste do MTPA
+
+Faixa de Valores: 0 a 4,0
+
+Padrão: 0,5
+
+Propriedades: VVW PM
+
+Grupos de Acesso via HMI: MOTOR
+
+Descrição: Ajuste para o algoritmo MTPA (Maximum Torque Per Ampere).
+
+P0446/P0447 – Ganho Prop./Integral do MTPA
+
+Faixa de Valores: 0-5.0 / 0-0.5
+
+Padrões: 1.0 / 0.012
+
+Propriedades: VVW PM
+
+Grupos de Acesso via HMI: MOTOR
+
+Descrição: Ganhos do regulador do algoritmo MTPA.
+
+P0448 – Estabilizador da Corrente
+
+Faixa de Valores: 0 a 30,0
+
+Padrão: 0,75
+
+Propriedades: VVW PM
+
+Grupos de Acesso via HMI: MOTOR
+
+Descrição: Ganho para eliminar instabilidade de corrente/velocidade em motores PM.
+
+P0451 – Velocidade Inicial do Estabilizador de Corrente
+
+Faixa de Valores: 0,0 a 100,0 %
+
+Padrão: 2,0 %
+
+Propriedades: VVW PM
+
+Grupos de Acesso via HMI: MOTOR
+
+Descrição: Percentual da velocidade nominal para ativar o estabilizador de corrente P0448.
+
+P0452 – Constante de Tempo do Filtro Passa-Baixa Correntes - DQ
+
+Faixa de Valores: 1 a 10000,0 ms
+
+Padrão: 1
+
+Propriedades: VVW PM
+
+Grupos de Acesso via HMI: MOTOR
+
+Descrição: Constante de tempo do filtro para as correntes D e Q no controle VVW PM.
+
+P0453 – Tempo da Rampa Auxiliar na Partida do Motor
+
+Faixa de Valores: 0 a 999,9 s
+
+Padrão: 0,0 s
+
+Propriedades: VVW PM
+
+Grupos de Acesso via HMI: MOTOR
+
+Descrição: Ativa uma rampa auxiliar na partida até a velocidade definida em P0451.
+
+P0454 – Percentual da Tensão Mínima do MTPA
+
+Faixa de Valores: 0 a 100,0 %
+
+Padrão: 100,0
+
+Propriedades: VVW PM
+
+Grupos de Acesso via HMI: MOTOR
+
+Descrição: Define a tensão mínima (% da tensão Ke x Nrpm) aplicada quando o MTPA está ativo.
+
+Parâmetros de Funções Especiais (Grupo HMI: I/O, PID, etc.)
+
+P0193 a P0199: (Já listados na seção HMI) Parâmetros do Relógio.
+
+P0202 – Tipo de Controle
+
+Faixa de Valores: 0=V/f, 3=Sensorless, 4=Vetorial c/ Encoder, 5=VVW, 8=VVW PM
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: STARTUP
+
+Descrição: Seleciona o modo de controle principal do motor.
+
+P0203 – Sel. Função Especial
+
+Faixa de Valores: 0=Nenhuma, 1=PID via AI1, 2=PID via AI3, 3=PID via FI
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Habilita a função especial Regulador PID e seleciona a fonte de realimentação.
+
+P0204 – Carrega / Salva Parâm.
+
+Faixa de Valores: 0-2=Sem Função, 3=Reset P0043, 4=Reset P0044, 5=Carrega WEG 60Hz, 6=Carrega WEG 50Hz, 7=Carrega Usuário 1, 8=Carrega Usuário 2, 9=Salva Usuário 1, 10=Salva Usuário 2, 11=Carrega Padrão SoftPLC
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Executa funções de backup/restauração de parâmetros ou reset de contadores.
+
+P0217 – Frequência para Dormir
+
+Faixa de Valores: 0,0 a 500,0 Hz
+
+Padrão: 0,0 Hz
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Frequência abaixo da qual o inversor pode entrar no estado Dormir (Sleep).
+
+P0218 – Tempo para Dormir
+
+Faixa de Valores: 0 a 999 s
+
+Padrão: 0 s
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Tempo que as condições para Dormir (P0217, P0535) devem permanecer para ativar o estado.
+
+P0299 – Tempo Frenag. Partida
+
+Faixa de Valores: 0,0 a 15,0 s
+
+Padrão: 0,0 s
+
+Propriedades: V/f, VVW, VVW PM, Sless
+
+Grupos de Acesso via HMI: -
+
+Descrição: Duração da aplicação de Frenagem CC (definida em P0302) no início do comando Gira.
+
+P0300 – Tempo Frenagem Parada
+
+Faixa de Valores: 0,0 a 15,0 s
+
+Padrão: 0,0 s
+
+Propriedades: V/f, VVW, VVW PM, Sless
+
+Grupos de Acesso via HMI: -
+
+Descrição: Duração da aplicação de Frenagem CC (definida em P0302) após comando Para (se parada por rampa).
+
+P0301 – Frequência de Início da Frenagem CC na Parada
+
+Faixa de Valores: 0,0 a 500,0 Hz
+
+Padrão: 3,0 Hz
+
+Propriedades: V/f, VVW, VVW PM, Sless
+
+Grupos de Acesso via HMI: -
+
+Descrição: Frequência abaixo da qual a Frenagem CC de parada (P0300) inicia.
+
+P0302 – Tensão Frenagem CC
+
+Faixa de Valores: 0,0 a 100,0 %
+
+Padrão: 20,0 %
+
+Propriedades: V/f, VVW, VVW PM
+
+Grupos de Acesso via HMI: -
+
+Descrição: Nível da tensão CC aplicada durante a Frenagem CC (percentual relativo a P0409 e P0295).
+
+P0303/P0304 – Frequência Evitada 1 / 2
+
+Faixa de Valores: 0,0 a 500,0 Hz
+
+Padrões: 20,0 Hz / 30,0 Hz
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Frequências centrais das faixas a serem evitadas para prevenir ressonância mecânica.
+
+P0306 – Faixa Evitada
+
+Faixa de Valores: 0,0 a 25,0 Hz
+
+Padrão: 0,0 Hz
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Largura da faixa (acima e abaixo) das frequências evitadas P0303/P0304.
+
+P0317 – Start-up Orientado
+
+Faixa de Valores: 0=Não, 1=Sim
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: STARTUP
+
+Descrição: Ativa a rotina guiada de configuração inicial dos parâmetros essenciais.
+
+P0318 – Upload de Plug-in
+
+Faixa de Valores: 0=Inativo, 1=Upload Ativo
+
+Padrão: -
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Inicia o processo de transferência de dados (parâmetros, SoftPLC) do módulo plug-in para o inversor (usado sem CFW500-MMF).
+
+P0319 – Função Copy HMI Alfa
+
+Faixa de Valores: 0=Inativa, 1=Inversor->HMI, 2=HMI->Inversor
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: HMI
+
+Descrição: Permite copiar parâmetros e usuários (exceto SoftPLC) entre inversor e HMI Alfanumérica.
+
+P0320 – Flying Start/Ride-Through
+
+Faixa de Valores: 0=Inativas, 1=FS, 2=FS/RT, 3=RT
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Habilita as funções Flying Start (partida com motor girando) e/ou Ride-Through (recuperação após queda de rede).
+
+P0321/P0322/P0323 – Ud para Falta de Rede / Ride-Through / Retorno Rede
+
+Faixa de Valores: 178 a 770 V
+
+Padrões: Dependem de P0296 (Ver manual)
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: -
+
+Descrição: Níveis de tensão do Link DC para detecção de falta de rede (P0321), manutenção durante Ride-Through (P0322) e detecção de retorno da rede (P0323).
+
+P0325/P0326 – Ganho Prop./Integr. RT
+
+Faixa de Valores: 0.0-63.9 / 0.000-9.999
+
+Padrões: 22.8 / 0.128
+
+Propriedades: Vetorial
+
+Grupos de Acesso via HMI: -
+
+Descrição: Ganhos do controlador PI que regula o Link DC durante a função Ride-Through.
+
+P0327 – Rampa Corr. I/f F.S.
+
+Faixa de Valores: 0,000 a 1,000
+
+Padrão: 0,070
+
+Propriedades: Sless
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define a rampa da corrente no modo I/f da função Flying Start sensorless.
+
+P0328 – Filtro do Flying Start
+
+Faixa de Valores: 0,000 a 1,000 s
+
+Padrão: 0,085 s
+
+Propriedades: Sless
+
+Grupos de Acesso via HMI: -
+
+Descrição: Tempo de permanência na condição que indica que a velocidade foi encontrada no Flying Start.
+
+P0329 – Rampa de Frequência do I/f do F.S.
+
+Faixa de Valores: 2,0 a 50,0
+
+Padrão: 6,0
+
+Propriedades: Sless
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define a taxa de variação da frequência na busca de velocidade do Flying Start sensorless.
+
+P0331 – Rampa de Tensão para FS e RT
+
+Faixa de Valores: 0,2 a 60,0 s
+
+Padrão: 2,0 s
+
+Propriedades: V/f, VVW, VVW PM
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define o tempo de subida da tensão de saída após a partida via Flying Start ou retorno de rede via Ride-Through.
+
+P0339 - Compensação da Tensão de Saída em V/f
+
+Faixa de Valores: 0=Inativo, 1=Ativo
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Ativa a compensação da tensão de saída para garantir que a tensão aplicada ao motor seja igual à nominal (P0400) mesmo com rede acima.
+
+P0372 – Nível para Frenagem CC Sensorless
+
+Faixa de Valores: 0,0 a 90,0 %
+
+Padrão: 40,0 %
+
+Propriedades: Sless
+
+Grupos de Acesso via HMI: -
+
+Descrição: Nível de corrente (% da corrente nominal do inversor) aplicada durante a Frenagem CC no modo Sensorless.
+
+Parâmetros do Regulador PID (Grupo HMI: PID, SPLC)
+
+P0510 a P0517: Unidades de Engenharia e Ponto Decimal para SoftPLC (ver Grupo SPLC).
+
+P0520/P0521/P0522 – Ganho Proporcional/Integral/Diferencial PID
+
+Faixa de Valores: 0.000-9.999 / 0.000-9.999 / 0.000-9.999
+
+Padrões: 1.000 / 0.430 / 0.000
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Ganhos do regulador PID interno.
+
+P0525 – Setpoint PID pela HMI
+
+Faixa de Valores: 0,0 a 100,0 %
+
+Padrão: 0,0 %
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Valor do Setpoint PID quando a referência vem das teclas da HMI (P0221/P0222 = 0).
+
+P0526 – Filtro Setpoint PID
+
+Faixa de Valores: 0 a 9999 ms
+
+Padrão: 50 ms
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Constante de tempo do filtro aplicado ao Setpoint PID.
+
+P0527 – Tipo de Ação PID
+
+Faixa de Valores: 0=Direto, 1=Reverso
+
+Padrão: 0
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define se a ação do PID é direta (aumenta saída para aumentar processo) ou reversa.
+
+P0528/P0529 – Escala/Forma Indicação VP
+
+Faixa de Valores: 10-30000 / 0-3
+
+Padrões: 1000 / 1
+
+Propriedades: -
+
+Grupos de Acesso via HMI: HMI
+
+Descrição: Define a escala e o formato (casas decimais) para exibição de P0040/P0041.
+
+P0533 – Valor VPx
+
+Faixa de Valores: 0,0 a 100,0 %
+
+Padrão: 90,0 %
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Nível percentual da variável de processo para comparação nas funções de saída digital 22 e 23.
+
+P0535 – Faixa p/ Acordar
+
+Faixa de Valores: 0,0 a 100,0 %
+
+Padrão: 0,0 %
+
+Propriedades: -
+
+Grupos de Acesso via HMI: I/O
+
+Descrição: Faixa de erro (%) aceitável em torno do setpoint para o PID entrar/sair do modo Dormir.
+
+P0536 – Ajuste Autom. P0525
+
+Faixa de Valores: 0=Inativo, 1=Ativo
+
+Padrão: 0
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Quando ativo, copia P0040 para P0525 ao comutar de Manual para Automático no PID.
+
+Parâmetros de Funções Avançadas (Economia de Energia, Fire Mode)
+
+P0580 – Configuração "Fire Mode"
+
+Faixa de Valores: 0=Inativo, 1=Ativo(mantém ref.), 2=Ativo(Vmax), 3=Ativo(Setpoint PID P0581), 4=Ativo(Desab. Geral)
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define o modo de operação da função Fire Mode (ignora falhas e comandos de parada).
+
+P0581 – Setpoint do PID em "Fire Mode"
+
+Faixa de Valores: -100,0 % a 100,0 %
+
+Padrão: 100,0 %
+
+Propriedades: -
+
+Grupos de Acesso via HMI: -
+
+Descrição: Define o Setpoint do PID quando P0580 = 3.
+
+P0582 – Configuração Auto-Reset
+
+Faixa de Valores: 0=Limitado, 1=Ilimitado
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: HVAC
+
+Descrição: Define se o Auto-Reset de falhas críticas (F0022, F0070) é limitado (conforme P0340) ou ilimitado durante o Fire Mode.
+
+P0588 – Máximo Torque EOC
+
+Faixa de Valores: 0 a 85 %
+
+Padrão: 0 %
+
+Propriedades: V/f
+
+Grupos de Acesso via HMI: MOTOR, NET
+
+Descrição: Nível máximo de torque (% do nominal) para ativar a função Economia de Energia (EOC). 0 = desabilitado.
+
+P0589 – Tensão Mínima EOC
+
+Faixa de Valores: 8 a 40 %
+
+Padrão: 40 %
+
+Propriedades: V/f
+
+Grupos de Acesso via HMI: MOTOR, NET
+
+Descrição: Tensão mínima (% da tensão V/f) aplicada durante a Economia de Energia.
+
+P0590 – Velocidade Mínima EOC
+
+Faixa de Valores: 360 a 18000 rpm
+
+Padrão: 600 rpm
+
+Propriedades: V/f
+
+Grupos de Acesso via HMI: MOTOR, NET
+
+Descrição: Velocidade mínima para a Economia de Energia permanecer ativa.
+
+P0591 – Histerese EOC
+
+Faixa de Valores: 0 a 30 %
+
+Padrão: 10 %
+
+Propriedades: V/f
+
+Grupos de Acesso via HMI: MOTOR, NET
+
+Descrição: Histerese para ativar/desativar a Economia de Energia.
+
+Parâmetros de Leitura Diversos
+
+P0613 – Revisão do Software
+
+Faixa de Valores: -32768 a 32767
+
+Padrão: Conforme revisão
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: READ
+
+Descrição: Contador que indica a revisão do software.
+
+P0639 – Nível de Subtensão
+
+Faixa de Valores: 70,0 a 100,0 %
+
+Padrão: 100,0 %
+
+Propriedades: cfg, V/f, VVW PM
+
+Grupos de Acesso via HMI: -
+
+Descrição: Ajusta o nível percentual da tensão nominal do Link DC para disparo da falha de subtensão F0021.
+
+Parâmetros de Comunicação (CAN, DeviceNet, Profibus, Ethernet, etc. - Grupo HMI: NET)
+
+(Resumo por protocolo)
+
+Bluetooth (P0990, P0991): Define o nome local e senha PIN para a interface Bluetooth.
+
+CANopen/DeviceNet (P0700-P0722): Configuram Protocolo, Endereço, Taxa, Reset Bus Off, Instâncias I/O e monitoram estados. P0684/P0685 definem palavra de controle/referência via CAN.
+
+Profibus DP (P0740-P0755, P0918, P0922, P0963, P0967, P0968): Configuram Perfil, Endereço, Taxa, Telegrama selecionado e monitoram estados. P0967/P0968 definem palavra de controle/status.
+
+Ethernet (Modbus TCP, EtherNet/IP, PROFINET IO - P0800-P0849): Configuram tipo de módulo, estado, taxa, IP (DHCP/Parâmetros), Gateway, leituras/escritas e atualização.
+
+BACnet/SimbyNet (P0760-P0798): Configuram instâncias, mestres, frames, tokens, grupos de registradores para troca cíclica.
+
+Parâmetros SoftPLC (Grupo HMI: SPLC)
+
+P1000 – Estado da SoftPLC
+
+Faixa de Valores: 0=Sem Aplicativo, 1=Instal. Aplic., 2=Aplic. Incomp., 3=Aplic. Parado, 4=Aplic. Rodando
+
+Padrão: 0
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: SPLC
+
+Descrição: Indica o estado atual da SoftPLC e do aplicativo carregado.
+
+P1001 – Comando para SoftPLC
+
+Faixa de Valores: 0, 2-4=Para Aplic., 1=Executa Aplic., 5=Exclui Aplic.
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: SPLC
+
+Descrição: Comanda a execução, parada ou exclusão do aplicativo SoftPLC do usuário.
+
+P1002 – Tempo Ciclo de Scan
+
+Faixa de Valores: 0 a 65535 ms
+
+Padrão: -
+
+Propriedades: ro
+
+Grupos de Acesso via HMI: SPLC
+
+Descrição: Tempo de varredura (scan time) do aplicativo SoftPLC.
+
+P1003 – Seleção do Aplicativo SoftPLC
+
+Faixa de Valores: 0=Usuário, 1=RApp
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: SPLC
+
+Descrição: Seleciona se a SoftPLC executará o aplicativo carregado pelo usuário ou o Aplicativo Residente (RApp).
+
+P1004 – Ação para Aplicativo SoftPLC não Rodando
+
+Faixa de Valores: 0=Inativo, 1=Gera Alarme, 2=Gera Falha
+
+Padrão: 0
+
+Propriedades: cfg
+
+Grupos de Acesso via HMI: SPLC
+
+Descrição: Define a ação se a SoftPLC não estiver rodando quando deveria (alarme A0708 ou falha F0709).
+
+P1008 – Erro de Lag
+
+Faixa de Valores: -9999 a 9999
+
+Padrão: -
+
+Propriedades: ro, Enc
+
+Grupos de Acesso via HMI: SPLC
+
+Descrição: Diferença em pulsos do encoder entre posição de referência e real (controle de posição SoftPLC).
+
+P1009 – Ganho de Posição
+
+Faixa de Valores: 0,0 a 6553,5
+
+Padrão: 10,0
+
+Propriedades: Enc
+
+Grupos de Acesso via HMI: SPLC
+
+Descrição: Ganho do controlador de posição SoftPLC.
+
+P1010 a P1059 – Parâmetros SoftPLC 1 a 50
+
+Faixa de Valores: -32768 a 32767
+
+Padrão: 0
+
+Propriedades: -
+
+Grupos de Acesso via HMI: SPLC
+
+Descrição: Parâmetros genéricos para uso pelo aplicativo SoftPLC.
+
+
+APPEND: Análise da Configuração das Tabelas 1 e 2
+
+(Conforme análise anterior)
+
+Tabela 1: Configurações Gerais do CFW500 e do Motor
+
+Configura o inversor para um motor específico (0.25 kW, 220V, 1.5A, 60Hz, 1700rpm) usando controle V/f.
+
+Define rampas de 5s com perfil S.
+
+Ajusta limites de velocidade e corrente (150% In).
+
+Desativa compensação de escorregamento e Boost Automático. Boost Manual em 5.0% (possível inconsistência com justificativa, verificar necessidade).
+
+Configura tensão e frequência de chaveamento.
+
+Tabela 2: Configurações para Comunicação via Modbus RTU no CFW500
+
+Configura o inversor para operar em modo Remoto, recebendo comandos e referência via Serial (Modbus RTU).
+
+Define parâmetros Modbus: Endereço 1, Velocidade 19200 bps, Formato 8N1.
+
+Habilita protocolo Modbus RTU na interface padrão (Serial 1).
+
+Configura ação de segurança: Parar por rampa se ocorrer timeout de comunicação (watchdog) de 5 segundos.
+
+Indica quais parâmetros (P0682, P0683) serão usados pelo mestre para controle.
+
+Conclusão do APPEND: A configuração combinada das tabelas prepara o CFW500 para controlar o motor especificado usando controle V/f, recebendo todos os comandos e setpoints via Modbus RTU (endereço 1, 19200, 8N1), com parada segura em caso de falha de comunicação superior a 5 segundos.
+
+Análise da Configuração da Planilha de Resumo ("Tabela 1" e "Tabela 2")
+
+Com base nos valores e justificativas presentes nas tabelas fornecidas na última página do OCR:
+
+Tabela 1: Configurações Gerais do CFW500 e do Motor
+
+P0100 (Tempo Acel 1): 5,0 s - Definido conforme cálculo prévio.
+
+P0101 (Tempo Desacel 1): 5,0 s - Mantido igual à aceleração para simetria.
+
+P0104 (Rampa S): 1 (Curva S) - Ativada para suavizar partidas/paradas e reduzir choques mecânicos.
+
+P0105 (Seleção 1ª/2ª Rampa): 0 (1ª Rampa) - Utilizará sempre a rampa principal, sem necessidade de alternar.
+
+P0133 (Velocidade Mínima): 0,0 Hz - Permite partir de velocidade zero.
+
+P0134 (Velocidade Máxima): 60,0 Hz - Definida para a frequência nominal do motor.
+
+P0135 (Corrente Máx Saída): 2,2 A - Ajustado para 150% da corrente nominal do motor (1,5 A), provendo proteção e permitindo sobrecorrentes momentâneas.
+
+P0136 (Boost Torque Manual): 5,0 % - Desativado (Nota: A descrição diz desativado, mas o valor é 5.0%. A justificativa indica que não é necessário aumento de torque em baixas velocidades, o que implica em um valor baixo ou zero. Pode haver uma inconsistência ou o 5.0% é considerado desativado na prática para esta aplicação).
+
+P0137 (Boost Torque Automático): 0,0 % - Mantido em 0%, sem compensação adicional de torque.
+
+P0138 (Compensação Escorreg.): 0,0 % - Desativada, pois o escorregamento é mínimo em velocidades nominais.
+
+P0202 (Tipo de Controle): 0 (V/f) - Controle escalar V/f, adequado para operação próxima à velocidade nominal, sem necessidade de controle vetorial.
+
+P0296 (Tensão Nominal Rede): 0 (200-240 V) - Configurado conforme tensão de alimentação disponível (220V).
+
+P0297 (Frequência Chaveamento): 7500 Hz - Valor ajustado conforme necessidade da aplicação (implica em menor ruído acústico).
+
+P0400 (Tensão Nominal Motor): 220 V - Conforme especificação do motor.
+
+P0401 (Corrente Nominal Motor): 1,5 A - Calculada baseada na potência (245W) e tensão nominal do motor.
+
+P0402 (Velocidade Nominal Motor): 1700 rpm - Conforme memorial de cálculo (especificação do motor).
+
+P0403 (Frequência Nominal Motor): 60,0 Hz - Frequência padrão da rede e correspondente à velocidade nominal.
+
+P0404 (Potência Nominal Motor): 2 (0,25 kW / 0,33 HP) - Código selecionado mais próximo da potência real do motor (245W ≈ 0,25 kW).
+
+P0407 (Fator Potência Motor): 0,65 - Valor típico para motores de baixa potência, conforme especificado.
+
+Tabela 2: Configurações para Comunicação via Modbus RTU no CFW500
+
+P0220 (Fonte Local/Remoto): 1 (Remoto) - Configura o inversor para ser controlado via modo Remoto (necessário para controle via Modbus).
+
+P0222 (Ref. Remota): 9 (Serial) - Define que a referência de velocidade no modo Remoto virá da interface Serial (Modbus).
+
+P0226 (Giro Remoto): 5 (Serial) - Permite que o comando de sentido de giro no modo Remoto seja via interface Serial (Modbus).
+
+P0227 (Gira/Para Remoto): 2 (Serial) - Define que o comando Gira/Para no modo Remoto virá da interface Serial (Modbus).
+
+P0308 (Endereço Serial): 1 - Define o endereço 1 para o escravo Modbus RTU (deve ser único na rede).
+
+P0310 (Taxa Comunicação): 1 (19200 bps) - Define a velocidade da comunicação Modbus. Deve coincidir com a do mestre (ex: Raspberry Pi Pico).
+
+P0311 (Config. Bytes): 0 (8N1) - Configura o formato 8 bits de dados, sem paridade, 1 stop bit. Deve coincidir com o do mestre.
+
+P0312 (Protocolo Serial): 2 (Modbus RTU1) - Seleciona Modbus RTU na interface serial padrão (bornes RS485), permitindo controle via RS485.
+
+P0313 (Ação Erro Comunic.): 1 (Para por Rampa) - Em caso de erro de comunicação, o motor para suavemente usando a rampa de desaceleração.
+
+P0314 (Watchdog Serial): 5,0 s - Define um timeout de 5 segundos. Se não receber mensagens válidas nesse tempo, executa a ação de P0313.
+
+P0316 (Estado Interf. Serial): - (Verificado) - Indica que se deve verificar se a interface está ativa (valor = 1).
+
+P0682 (Palavra Controle Serial): - (Manipulada) - Será utilizada para enviar comandos (Habilita, Gira/Para) via Modbus pelo controlador externo.
+
+P0683 (Ref. Velocidade Serial): - (Manipulada) - Será utilizada para enviar a referência de velocidade via Modbus pelo controlador externo.
+
+Conclusão da Análise da Configuração:
+
+A configuração detalhada nas Tabelas 1 e 2 visa preparar o inversor CFW500 para:
+
+Controlar um motor de baixa potência (~0.25 kW, 220V, 1.5A, 60Hz) usando o modo de controle escalar V/f.
+
+Operar primariamente em modo Remoto.
+
+Receber os comandos principais (Gira/Para, Sentido de Giro) e a referência de velocidade através da interface serial padrão (RS485) utilizando o protocolo Modbus RTU.
+
+Comunicar-se a 19200 bps com formato de dados 8N1 e endereço de escravo 1.
+
+Implementar uma medida de segurança: em caso de perda de comunicação Modbus por mais de 5 segundos, o inversor deve parar o motor utilizando a rampa de desaceleração configurada.
+
+Utilizar rampas de aceleração/desaceleração de 5 segundos com perfil em "Curva S" para suavidade.
+
+A proteção de sobrecarga do motor está ajustada para 150% da corrente nominal.
