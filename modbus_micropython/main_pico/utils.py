@@ -8,7 +8,7 @@ from machine import UART, Pin
 state = {
     'VERBOSE_LEVEL': 1,
     'encoder_position': 0,
-    'encoder_offset': 0,
+    'encoder_offset_steps': 0, # Renamed for clarity (value is in steps)
     'encoder_output_mode': "deg",
     'homing_completed': False,
     'encoder_zero_offset': 0,
@@ -28,9 +28,19 @@ DE_RE_UART1_PIN.value(0)  # Initially enable receiver
 user_cmd_uart = UART(UART1_ID, baudrate=115200, tx=USER_CMD_TX_PIN, rx=USER_CMD_RX_PIN)
 user_cmd_uart.init(bits=8, parity=None, stop=1)  # Use 1 stop bit for higher baud rates
 
+# Define critical message prefixes
+CRITICAL_PREFIXES = ("[SAFETY]", "[WARNING]", "[ALERT]", "[ERROR]")
+
 def print_verbose(message, level, override=False):
-    """Prints messages according to the verbosity level."""
-    if override or (state['VERBOSE_LEVEL'] >= level and state['VERBOSE_LEVEL'] > 0):
+    """Prints messages according to the verbosity level, always showing critical messages."""
+    is_critical = any(message.startswith(prefix) for prefix in CRITICAL_PREFIXES)
+    current_level = state['VERBOSE_LEVEL']
+
+    # Determine if the message should be printed
+    # Print if: override is True OR message is critical OR (level is appropriate AND verbosity is not 0)
+    should_print = override or is_critical or (current_level > 0 and level <= current_level)
+
+    if should_print:
         # Also print to USB serial for debugging
         print(message)
 
@@ -68,14 +78,14 @@ Available Commands:
 ===========================================
 """
     print_verbose(manual, 0, override=True)
-
 def save_configuration():
     """Saves settings to a configuration file."""
     config = {
-        "encoder_offset": state['encoder_offset'],
+        "encoder_offset_steps": state['encoder_offset_steps'], # Renamed key
         "encoder_output_mode": state['encoder_output_mode'],
         "VERBOSE_LEVEL": state['VERBOSE_LEVEL']
     }
+    # Removed extra brace from previous incorrect diff
     try:
         with open(CONFIG_FILE, 'w') as f:
             json.dump(config, f)
@@ -88,19 +98,22 @@ def load_configuration():
     try:
         with open(CONFIG_FILE, 'r') as f:
             config = json.load(f)
-        state['encoder_offset'] = config.get("encoder_offset", 0)
+        # Use renamed key and provide default value
+        state['encoder_offset_steps'] = config.get("encoder_offset_steps", 0)
         state['encoder_output_mode'] = config.get("encoder_output_mode", "deg")
         state['VERBOSE_LEVEL'] = config.get("VERBOSE_LEVEL", 1)
-        print_verbose(f"[INFO] Loaded encoder offset from configuration: {state['encoder_offset']}", 0)
+        print_verbose(f"[INFO] Loaded encoder offset (steps) from configuration: {state['encoder_offset_steps']}", 0)
         print_verbose(f"[INFO] Loaded encoder output mode from configuration: '{state['encoder_output_mode']}'", 0)
         print_verbose(f"[INFO] Loaded verbosity level from configuration: {state['VERBOSE_LEVEL']}", 0)
     except FileNotFoundError:
         print_verbose("[WARNING] Configuration file not found. Using default settings.", 0)
-        state['encoder_offset'] = 0
+        # Ensure defaults match state definition
+        state['encoder_offset_steps'] = 0
         state['encoder_output_mode'] = "deg"
         state['VERBOSE_LEVEL'] = 1
     except Exception as e:
         print_verbose(f"[ERROR] Failed to load configuration: {e}", 0)
-        state['encoder_offset'] = 0
+         # Ensure defaults match state definition
+        state['encoder_offset_steps'] = 0
         state['encoder_output_mode'] = "deg"
         state['VERBOSE_LEVEL'] = 1

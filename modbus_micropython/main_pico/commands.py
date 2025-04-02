@@ -98,11 +98,12 @@ async def process_command(command, cfw500):
             else:
                 print_verbose("[ERROR] Specify the encoder output mode ('step' or 'deg').", 2, override=True)
         elif cmd == "calibrate":
-            state['encoder_offset'] = state['encoder_position']
+            # The offset is stored in steps, based on the current raw position
+            state['encoder_offset_steps'] = state['encoder_position'] # Use renamed state variable
             save_configuration()
-            print_verbose("[ACTION] Encoder calibrated. Current position set as zero.", 2, override=True)
+            print_verbose(f"[ACTION] Encoder calibrated. Offset set to {state['encoder_offset_steps']} steps.", 2, override=True)
         elif cmd == "read_offset":
-            print_verbose(f"[INFO] Encoder offset: {state['encoder_offset']}", 2, override=True)
+            print_verbose(f"[INFO] Encoder offset: {state['encoder_offset_steps']} steps", 2, override=True) # Use renamed state variable
         elif cmd == "read_max_rpm":
             max_rpm = cfw500.read_max_rpm()
             if max_rpm is not None:
@@ -122,5 +123,5 @@ async def process_command(command, cfw500):
         else:
             print_verbose("[ERROR] Unrecognized command. Type 'help' to see the list of commands.", 2, override=True)
     except Exception as e:
-        print_verbose(f"[ERROR] Exception occurred: {e}", 2, override=True)
+        print_verbose(f"[ERROR] Exception occurred during command processing: {e}", 2, override=True)
     return True  # Continue running

@@ -29,19 +29,22 @@ def initialize_encoder(pin_a_num, pin_b_num, callback):
 def encoder_callback(value, delta, state):
     # Invert the raw value to correct the direction
     inverted_value = -value
-    encoder_position = inverted_value - state['encoder_zero_offset']
+    encoder_position = inverted_value - state['encoder_zero_offset'] # Position relative to homing switch
 
+    # Apply the calibrated offset (in steps) if homing is complete
     if not state['homing_completed']:
         adjusted_position = encoder_position
     else:
-        adjusted_position = encoder_position - state['encoder_offset']
+        adjusted_position = encoder_position - state['encoder_offset_steps'] # Use renamed state variable
 
-    # Check for overflow and adjust encoder_offset if necessary
+    # Check for overflow and adjust the offset if necessary
+    # NOTE: This overflow logic might need review depending on desired behavior.
+    # It currently adjusts the offset itself, which might be unexpected if calibration is meant to be fixed.
     if adjusted_position >= MAX_STEPS:
-        state['encoder_offset'] += MAX_STEPS
+        state['encoder_offset_steps'] += MAX_STEPS # Use renamed state variable
         adjusted_position -= MAX_STEPS
     elif adjusted_position <= -MAX_STEPS:
-        state['encoder_offset'] -= MAX_STEPS
+        state['encoder_offset_steps'] -= MAX_STEPS # Use renamed state variable
         adjusted_position += MAX_STEPS
 
     if state['encoder_output_mode'] == "deg":
