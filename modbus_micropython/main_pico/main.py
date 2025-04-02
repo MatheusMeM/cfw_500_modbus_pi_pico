@@ -46,10 +46,11 @@ async def homing(cfw500):
     """Performs the homing routine to establish the zero position."""
     print_verbose("[INFO] Starting homing routine...", 0)
 
-    # Move motor towards the endstop slowly
+    # Move motor towards the endstop
+    homing_speed_rpm = 1000 # Use 1000 RPM as confirmed
     try:
-        cfw500.start_motor(100)  # Start motor at 100 RPM for homing
-        print_verbose("[ACTION] Motor started at 100 RPM for homing.", 0)
+        cfw500.start_motor(homing_speed_rpm)
+        print_verbose(f"[ACTION] Motor started at {homing_speed_rpm} RPM for homing.", 0)
     except Exception as e:
         print_verbose(f"[ERROR] Failed to start motor: {e}", 0)
         return
@@ -63,10 +64,8 @@ async def homing(cfw500):
         print_verbose("[INFO] Endstop triggered during homing.", 0)
 
         # Capture the encoder's hardware count as the zero offset
-        state['encoder_zero_offset'] += state['encoder_position']
+        state['encoder_zero_offset'] = state['encoder_position'] # Assign directly, don't accumulate
         print_verbose(f"[DEBUG] Encoder zero offset set to: {state['encoder_zero_offset']}", 0)
-
-    zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=endstop_triggered_callback)
 
     # Wait in a loop until endstop is triggered
     while not endstop_triggered:
@@ -90,21 +89,27 @@ async def homing(cfw500):
     if steps_to_target == 0:
         print_verbose("[INFO] Already at target position.", 0)
     else:
-        # Determine the direction to move
+        # Determine the direction and speed to move
+        move_speed_rpm = 1000 # Use 1000 RPM for moving to offset
         if steps_to_target > 0:
             direction = 'forward'
-            start_motor_fn = cfw500.start_motor
-        else:
+            print_verbose(f"[DEBUG] Homing Phase 2: Moving FORWARD to target {steps_to_target} at {move_speed_rpm} RPM", 0)
+            try:
+                cfw500.start_motor(move_speed_rpm) # Explicit call
+            except Exception as e:
+                print_verbose(f"[ERROR] Failed to start motor forward: {e}", 0)
+                return
+        else: # steps_to_target <= 0
             direction = 'reverse'
-            start_motor_fn = cfw500.reverse_motor
+            print_verbose(f"[DEBUG] Homing Phase 2: Moving REVERSE to target {steps_to_target} at {move_speed_rpm} RPM", 0)
+            try:
+                cfw500.reverse_motor(move_speed_rpm) # Explicit call
+            except Exception as e:
+                print_verbose(f"[ERROR] Failed to start motor reverse: {e}", 0)
+                return
 
-        # Start moving the motor in the correct direction
-        try:
-            start_motor_fn(100)
-            print_verbose(f"[ACTION] Moving motor {direction} to target position.", 0)
-        except Exception as e:
-            print_verbose(f"[ERROR] Failed to start motor: {e}", 0)
-            return
+        # Log the action
+        print_verbose(f"[ACTION] Moving motor {direction} to target position.", 0)
 
         # Move until we reach the target encoder position
         target_position = state['encoder_offset']  # Since encoder_position is adjusted
@@ -115,7 +120,7 @@ async def homing(cfw500):
             if (direction == 'forward' and current_position >= target_position) or \
                (direction == 'reverse' and current_position <= target_position):
                 break
-            await asyncio.sleep(0.1)
+        await asyncio.sleep(0.02) # Check more frequently
 
         # Stop the motor
         try:
