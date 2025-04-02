@@ -20,6 +20,7 @@ SLAVE_ADDRESS = 1  # Modbus slave address of the inverter
 # LED Configuration
 LED_PIN = 25  # On-board LED pin on Raspberry Pi Pico
 led = Pin(LED_PIN, Pin.OUT)
+led.on() # Turn LED on permanently
 
 # Zero Endstop Detection on GPIO18
 zero_pin = Pin(18, Pin.IN, Pin.PULL_UP)
@@ -33,11 +34,7 @@ relay_pin2 = Pin(21, Pin.OUT)
 relay_pin1.value(0)
 relay_pin2.value(0)
 
-async def led_blink_task():
-    """Task to blink the on-board LED."""
-    while True:
-        led.toggle()
-        await asyncio.sleep(0.5)
+# Removed led_blink_task to reduce scheduler load
 
 # Zero Endstop Position Detection
 def zero_position_callback(pin):
@@ -64,17 +61,11 @@ async def homing(cfw500):
     endstop_triggered = False
 
     def endstop_triggered_callback(pin):
-        nonlocal endstop_triggered
-        # Simply set the flag. Stopping from IRQ is unreliable.
-        endstop_triggered = True
-        print_verbose("[INFO] Endstop triggered during homing.", 0)
-
-        # Capture the encoder's hardware count as the zero offset
-        state['encoder_zero_offset'] = state['encoder_position'] # Assign directly, don't accumulate
-        print_verbose(f"[DEBUG] Encoder zero offset set to: {state['encoder_zero_offset']}", 0)
-
-        # Signal the main homing loop that the endstop was hit
+        # --- IRQ Handler ---
+        # Keep this extremely simple: just set the event.
+        # Avoid prints, state updates, or Modbus calls here.
         endstop_event.set()
+        # --- End IRQ Handler ---
 
     # Attach the IRQ handler
     zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=endstop_triggered_callback)
@@ -82,68 +73,44 @@ async def homing(cfw500):
     # Wait efficiently for the IRQ to signal via the event
     print_verbose("[DEBUG] Waiting for endstop event...", 0)
     await endstop_event.wait()
+    print_verbose("[DEBUG] Endstop event received.", 0)
 
     # Stop the motor (This happens *after* the event is set and wait() returns)
-    try:
-        cfw500.stop_motor()
-        print_verbose("[ACTION] Motor stopped after homing.", 0)
-    except Exception as e:
-        print_verbose(f"[ERROR] Failed to stop motor: {e}", 0)
-        return
-
-    # Remove the interrupt handler for the endstop to prevent re-triggering during normal operation
-    zero_pin.irq(handler=None)
-
-    # Calculate steps to move to align with saved encoder_offset
-    steps_to_target = state['encoder_offset']  # Corrected calculation
-    print_verbose(f"[DEBUG] Calculated steps to target: {steps_to_target}", 0)
-
-    if steps_to_target == 0:
-        print_verbose("[INFO] Already at target position.", 0)
-    else:
-        # Determine the direction and speed to move
-        move_speed_rpm = 1000 # Use 1000 RPM for moving to offset
-        if steps_to_target > 0:
-            direction = 'forward'
-            print_verbose(f"[DEBUG] Homing Phase 2: Moving FORWARD to target {steps_to_target} at {move_speed_rpm} RPM", 0)
-            try:
-                cfw500.start_motor(move_speed_rpm) # Explicit call
-            except Exception as e:
-                print_verbose(f"[ERROR] Failed to start motor forward: {e}", 0)
-                return
-        else: # steps_to_target <= 0
-            direction = 'reverse'
-            print_verbose(f"[DEBUG] Homing Phase 2: Moving REVERSE to target {steps_to_target} at {move_speed_rpm} RPM", 0)
-            try:
-                cfw500.reverse_motor(move_speed_rpm) # Explicit call
-            except Exception as e:
-                print_verbose(f"[ERROR] Failed to start motor reverse: {e}", 0)
-                return
-
-        # Log the action
-        print_verbose(f"[ACTION] Moving motor {direction} to target position.", 0)
-
-        # Move until we reach the target encoder position
-        target_position = state['encoder_offset']  # Since encoder_position is adjusted
-        print_verbose(f"[DEBUG] Target encoder position: {target_position}", 0)
-        while True:
-            current_position = state['encoder_position']
-            print_verbose(f"[DEBUG] Current encoder position: {current_position}", 0)
-            if (direction == 'forward' and current_position >= target_position) or \
-               (direction == 'reverse' and current_position <= target_position):
-                break
-        await asyncio.sleep(0.02) # Check more frequently
-
-        # Stop the motor
+    # Loop sending stop command for a short duration to ensure it gets through
+    stop_success = False
+    stop_duration = 0.5  # seconds
+    start_time = time.ticks_ms()
+    print_verbose(f"[DEBUG] Attempting to stop motor for {stop_duration}s...", 0)
+    while time.ticks_diff(time.ticks_ms(), start_time) < int(stop_duration * 1000):
         try:
             cfw500.stop_motor()
-            print_verbose("[ACTION] Motor stopped at target position.", 0)
+            stop_success = True # Mark success if command sent at least once
+            # Don't print repeatedly in loop, print status after
         except Exception as e:
-            print_verbose(f"[ERROR] Failed to stop motor: {e}", 0)
-            return
+            print_verbose(f"[ERROR] Failed to send stop motor command during loop: {e}", 0)
+            stop_success = False
+            break # Exit loop if error occurs
+        await asyncio.sleep(0.05) # Yield briefly within the stop loop
 
-    # Do not change encoder_offset during homing
-    print_verbose("[INFO] Homing complete. Encoder offset remains unchanged.", 0)
+    if stop_success:
+        print_verbose("[ACTION] Motor stop command sent repeatedly after endstop event.", 0)
+    else:
+        print_verbose("[WARNING] Homing failed to send stop command.", 0)
+        # Decide if we should exit homing or try to continue without offset update
+        # return # Exit homing if stop fails - maybe allow continuing?
+
+    # Detach the IRQ handler *after* attempting to stop
+    zero_pin.irq(handler=None)
+    print_verbose("[DEBUG] Endstop IRQ detached.", 0)
+
+    # Update zero offset *after* stopping and detaching IRQ
+    state['encoder_zero_offset'] = state['encoder_position'] # Assign directly, don't accumulate
+    print_verbose(f"[DEBUG] Encoder zero offset set to: {state['encoder_zero_offset']}", 0)
+
+    # Phase 2 (moving to offset) removed as per user request.
+    # Homing now simply finds the endstop, stops, and sets the zero offset.
+
+    print_verbose("[INFO] Homing complete (Phase 1 only).", 0)
 
     # Set homing_completed to True
     state['homing_completed'] = True
@@ -269,7 +236,7 @@ async def main():
     await homing(cfw500)
 
     # Start tasks
-    asyncio.create_task(led_blink_task())
+    # asyncio.create_task(led_blink_task()) # Removed to reduce scheduler load
     asyncio.create_task(read_user_input(cfw500))
     asyncio.create_task(status_request_task(cfw500))
     asyncio.create_task(relay_control_task())  # Start the relay control task

@@ -12,7 +12,8 @@ state = {
     'encoder_output_mode': "deg",
     'homing_completed': False,
     'encoder_zero_offset': 0,
-    'fault_detected': False,  # Add this line
+    'fault_detected': False,
+    'encoder_print_counter': 0, # Counter for rate-limiting prints
 }
 
 CONFIG_FILE = "config.json"  # Configuration file to save settings
