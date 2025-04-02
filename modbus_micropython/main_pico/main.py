@@ -58,7 +58,7 @@ async def homing(cfw500):
         return
 
     # Wait until the endstop is triggered
-    endstop_triggered = False
+    # endstop_triggered = False # Replaced by event
 
     def endstop_triggered_callback(pin):
         # --- IRQ Handler ---
@@ -180,6 +180,10 @@ async def main():
     # Initialize cfw500
     cfw500 = initialize_cfw500(UART0_ID, TX_PIN_NUM, RX_PIN_NUM, DE_RE_PIN, SLAVE_ADDRESS)
 
+    # Start the task to wait for serial communication and show the manual FIRST
+    asyncio.create_task(await_serial_and_show_manual())
+    await asyncio.sleep(0.1) # Give the manual task a chance to start printing
+
     # --- Safety Stop ---
     # Ensure motor is stopped at the beginning before any operation
     try:
@@ -191,9 +195,6 @@ async def main():
     except Exception as e:
         print_verbose(f"[ERROR] Failed to send initial stop command or wait: {e}", 2)
     # --- End Safety Stop ---
-
-    # Start the task to wait for serial communication and show the manual
-    asyncio.create_task(await_serial_and_show_manual())
 
     # Read the maximum RPM from the inverter
     max_rpm = cfw500.read_max_rpm()
@@ -226,22 +227,42 @@ async def main():
     # Initialize the Encoder
     initialize_encoder(16, 17, lambda v, d: encoder_callback(v, d, state))
 
-    # Zero Endstop Detection
-    zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=zero_position_callback)
+    # Zero Endstop Detection (IRQ handler defined in homing)
+    # zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=zero_position_callback) # Initial setup moved to homing
 
     # Load configuration
     load_configuration()
 
+    # --- Temporarily disable background tasks for homing ---
+    print_verbose("[DEBUG] Starting background tasks initially...", 3)
+    status_task = asyncio.create_task(status_request_task(cfw500))
+    relay_task = asyncio.create_task(relay_control_task())
+    await asyncio.sleep(0.1) # Allow tasks to start
+
+    print_verbose("[DEBUG] Cancelling background tasks before homing...", 3)
+    status_task.cancel()
+    relay_task.cancel()
+    try: # Allow cancellations to process
+        await asyncio.sleep(0.1)
+    except asyncio.CancelledError:
+        pass
+    print_verbose("[DEBUG] Background tasks cancelled.", 3)
+    # --- End temporary disable ---
+
     # Perform homing routine
     await homing(cfw500)
 
-    # Start tasks
-    # asyncio.create_task(led_blink_task()) # Removed to reduce scheduler load
-    asyncio.create_task(read_user_input(cfw500))
-    asyncio.create_task(status_request_task(cfw500))
-    asyncio.create_task(relay_control_task())  # Start the relay control task
+    # --- Restart background tasks after homing ---
+    print_verbose("[DEBUG] Restarting background tasks after homing...", 3)
+    status_task = asyncio.create_task(status_request_task(cfw500))
+    relay_task = asyncio.create_task(relay_control_task())
+    # --- End restart ---
 
-    # Keep the main loop running
+    # Start main command reading task
+    asyncio.create_task(read_user_input(cfw500))
+
+    # Keep the main loop running (tasks run in background)
+    print_verbose("[INFO] Main loop started. System operational.", 2)
     while True:
         await asyncio.sleep(1)
 

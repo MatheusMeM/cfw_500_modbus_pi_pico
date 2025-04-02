@@ -55,11 +55,15 @@ def encoder_callback(value, delta, state):
         output = f"Encoder Position: {adjusted_position} steps"
 
     # Rate limit encoder position printing
-    state['encoder_print_counter'] += 1
-    if state['encoder_print_counter'] >= 10: # Print roughly every 10 updates
-        if state['VERBOSE_LEVEL'] == 1 or state['VERBOSE_LEVEL'] == 3:
-            print_verbose(output, 1)
-        state['encoder_print_counter'] = 0 # Reset counter
+    print_now = False
+    if state['VERBOSE_LEVEL'] == 1 or state['VERBOSE_LEVEL'] == 3:
+        state['encoder_print_counter'] += 1
+        if state['encoder_print_counter'] >= 10: # Print roughly every 10 updates
+            print_now = True
+            state['encoder_print_counter'] = 0 # Reset counter
+
+    if print_now:
+        print_verbose(output, 1)
 
     # Update the shared state
     state['encoder_position'] = encoder_position
