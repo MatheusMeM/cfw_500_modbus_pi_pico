@@ -60,14 +60,8 @@ async def homing(cfw500):
 
     def endstop_triggered_callback(pin):
         nonlocal endstop_triggered
-        # Stop motor immediately upon trigger
-        try:
-            cfw500.stop_motor()
-            print_verbose("[ACTION] Motor stop command sent from endstop IRQ.", 0)
-        except Exception as e:
-            print_verbose(f"[ERROR] Failed to stop motor from IRQ: {e}", 0)
-
-        endstop_triggered = True # Set flag after attempting stop
+        # Simply set the flag. Stopping from IRQ is unreliable.
+        endstop_triggered = True
         print_verbose("[INFO] Endstop triggered during homing.", 0)
 
         # Capture the encoder's hardware count as the zero offset
@@ -166,7 +160,7 @@ async def read_user_input(cfw500):
                                 return
                     except Exception as e:
                         print_verbose(f"[ERROR] Exception during decoding: {e}", 2)
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.02) # Check for commands more frequently
 
 async def status_request_task(cfw500):
     STATUS_REQUEST_INTERVAL = 5  # Interval in seconds
@@ -207,6 +201,17 @@ async def await_serial_and_show_manual():
 async def main():
     # Initialize cfw500
     cfw500 = initialize_cfw500(UART0_ID, TX_PIN_NUM, RX_PIN_NUM, DE_RE_PIN, SLAVE_ADDRESS)
+
+    # --- Safety Stop ---
+    # Ensure motor is stopped at the beginning before any operation
+    try:
+        print_verbose("[SAFETY] Ensuring motor is stopped on startup...", 2)
+        cfw500.stop_motor()
+        await asyncio.sleep(0.2) # Short delay to allow stop command to process
+        print_verbose("[SAFETY] Motor stop command sent.", 2)
+    except Exception as e:
+        print_verbose(f"[ERROR] Failed to send initial stop command: {e}", 2)
+    # --- End Safety Stop ---
 
     # Start the task to wait for serial communication and show the manual
     asyncio.create_task(await_serial_and_show_manual())
