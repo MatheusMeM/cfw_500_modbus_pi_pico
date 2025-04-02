@@ -60,7 +60,14 @@ async def homing(cfw500):
 
     def endstop_triggered_callback(pin):
         nonlocal endstop_triggered
-        endstop_triggered = True
+        # Stop motor immediately upon trigger
+        try:
+            cfw500.stop_motor()
+            print_verbose("[ACTION] Motor stop command sent from endstop IRQ.", 0)
+        except Exception as e:
+            print_verbose(f"[ERROR] Failed to stop motor from IRQ: {e}", 0)
+
+        endstop_triggered = True # Set flag after attempting stop
         print_verbose("[INFO] Endstop triggered during homing.", 0)
 
         # Capture the encoder's hardware count as the zero offset

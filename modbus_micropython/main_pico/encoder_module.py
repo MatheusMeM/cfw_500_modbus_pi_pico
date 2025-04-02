@@ -27,7 +27,9 @@ def initialize_encoder(pin_a_num, pin_b_num, callback):
     return encoder
 
 def encoder_callback(value, delta, state):
-    encoder_position = value - state['encoder_zero_offset']
+    # Invert the raw value to correct the direction
+    inverted_value = -value
+    encoder_position = inverted_value - state['encoder_zero_offset']
 
     if not state['homing_completed']:
         adjusted_position = encoder_position
