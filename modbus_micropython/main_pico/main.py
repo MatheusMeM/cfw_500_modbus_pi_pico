@@ -11,7 +11,7 @@ from utils import (
     print_verbose, show_manual, load_configuration, save_configuration,
     internal_state, slave_registers, update_input_registers,
     REG_CMD, REG_TARGET_RPM, REG_VERBOSE, REG_ENC_MODE, REG_OFFSET_STEPS,
-    REG_FAULT_FLAG, REG_HOMING_FLAG
+    REG_FAULT_FLAG, REG_HOMING_FLAG, REG_MAX_RPM # Added REG_MAX_RPM
 )
 from umodbus.serial import Serial as ModbusRTUSerial # Renamed for clarity, handles serial comms
 from umodbus.modbus import Modbus # Base class for register handling
@@ -221,6 +221,7 @@ async def modbus_slave_poll_task(modbus_handler_obj): # Pass Modbus handler obje
         try:
             # process() checks for incoming requests via the serial interface
             # and handles them based on the configured register map.
+            # Callbacks (like handle_command_register_write) are executed within process()
             result = modbus_handler_obj.process()
             # ADDED DEBUG: Check register value immediately after process()
             if internal_state['VERBOSE_LEVEL'] >= 3:
@@ -236,6 +237,72 @@ async def modbus_slave_poll_task(modbus_handler_obj): # Pass Modbus handler obje
         # Sleep briefly to yield control and define polling rate
         await asyncio.sleep_ms(MODBUS_SLAVE_POLL_INTERVAL_MS)
 
+# --- Modbus Register Callbacks ---
+def handle_command_register_write(reg_type, address, val):
+    """
+    Callback executed by umodbus when the command register (HREG 100) is written.
+    Triggers command processing based on the written value.
+    NOTE: This runs in the context of the modbus_slave_poll_task.
+          Keep it relatively quick or schedule longer actions.
+    """
+    global vfd_master # Need access to the VFD control object
+
+    # The library might pass a list even for single register writes
+    command_to_process = val[0] if isinstance(val, list) else val
+    print_verbose(f"[DEBUG CB] Command Register Write Detected: Value={command_to_process}", 3)
+
+    if command_to_process != 0:
+        # Read associated target RPM *at the time of the command write*
+        # Note: This assumes RPM register (101) was written *before* or *with* the command register (100)
+        try:
+            # Read directly from the library's internal state if possible,
+            # otherwise rely on our potentially stale dictionary value.
+            # For simplicity, we use our dictionary value for now.
+            target_rpm_val = slave_registers['HREGS']['target_rpm']['val']
+        except Exception as e:
+            print_verbose(f"[ERROR CB] Failed to read target RPM: {e}", 0)
+            target_rpm_val = 0 # Default to 0 on error
+
+        print_verbose(f"[DEBUG CB] Processing Command: {command_to_process}, RPM: {target_rpm_val}", 3)
+
+        # --- Execute Command ---
+        try:
+            if command_to_process == 1: # START
+                vfd_master.start_motor(target_rpm_val)
+                print_verbose(f"[ACTION CB] Motor START processed (RPM: {target_rpm_val}).", 0)
+            elif command_to_process == 2: # STOP
+                vfd_master.stop_motor()
+                print_verbose(f"[ACTION CB] Motor STOP processed.", 0)
+            elif command_to_process == 3: # REVERSE
+                vfd_master.reverse_motor(target_rpm_val)
+                print_verbose(f"[ACTION CB] Motor REVERSE processed (RPM: {target_rpm_val}).", 0)
+            elif command_to_process == 4: # RESET_FAULT
+                vfd_master.reset_fault()
+                print_verbose(f"[ACTION CB] VFD Fault RESET processed.", 0)
+            elif command_to_process == 5: # CALIBRATE
+                current_pos_rel_home = internal_state['encoder_raw_position'] - internal_state['encoder_zero_offset']
+                internal_state['encoder_offset_steps'] = current_pos_rel_home
+                update_input_registers(offset=internal_state['encoder_offset_steps'])
+                save_configuration()
+                print_verbose(f"[ACTION CB] Encoder CALIBRATE processed. New offset: {internal_state['encoder_offset_steps']}", 0)
+
+            # Acknowledge by resetting the command register *in our dictionary*
+            # The library handles the Modbus response automatically.
+            # We reset our view so command_processor doesn't re-process if it still checks.
+            # NOTE: This might cause issues if the write happens again before command_processor runs.
+            # Consider removing command_processor check entirely later.
+            slave_registers['HREGS']['command']['val'] = 0
+            # Also reset internal state tracking
+            internal_state['last_written_cmd'] = 0
+
+        except Exception as e:
+            print_verbose(f"[ERROR CB] Error processing command {command_to_process}: {e}", 0)
+    else:
+        # Command 0 written, potentially an acknowledgement clear by master.
+        print_verbose(f"[DEBUG CB] Command Register cleared (Value=0 received).", 3)
+        slave_registers['HREGS']['command']['val'] = 0
+        internal_state['last_written_cmd'] = 0
+
 # --- Main Application Logic ---
 async def main():
     # Show manual locally
@@ -245,6 +312,11 @@ async def main():
     load_configuration()
     # Ensure homing flag is initially false in register
     update_input_registers(homing=False)
+
+    # Link the command register callback function defined above
+    # This MUST be done before starting the slave poll task
+    slave_registers['HREGS']['command']['on_set_cb'] = handle_command_register_write
+    print_verbose("[INFO] Command register callback linked.", 2)
 
     # Initialize Encoder (uses internal_state, updates slave_registers via callback)
     initialize_encoder(16, 17) # Pins for encoder A, B
@@ -302,7 +374,8 @@ async def main():
 
     # --- Main Execution Loop ---
     while True:
-        # Process commands written via Modbus by the Relay Master
+        # Process non-command settings changes (like verbosity, encoder mode)
+        # Command processing is now handled by the callback
         await process_modbus_commands(vfd_master) # Pass the vfd_master instance
 
         # Main loop sleep
