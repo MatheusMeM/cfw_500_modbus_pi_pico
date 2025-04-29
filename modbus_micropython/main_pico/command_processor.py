@@ -22,6 +22,7 @@ async def process_modbus_commands(vfd_master):
 
     # --- Process Action Commands (REG_CMD) ---
     # Check if command register has a new non-zero value
+    print_verbose(f"[DEBUG CMD Check] Current CMD Reg: {cmd_reg_val}, Last Written: {internal_state['last_written_cmd']}", 3) # ADDED DEBUG
     if cmd_reg_val != 0 and cmd_reg_val != internal_state['last_written_cmd']:
         command_to_process = cmd_reg_val
         rpm_to_process = target_rpm_val # Use the RPM value present when command is detected

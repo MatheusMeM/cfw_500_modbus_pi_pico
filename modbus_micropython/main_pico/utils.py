@@ -155,7 +155,7 @@ def load_configuration():
         slave_registers['IREGS']['offset_steps']['val'] = 0
 
 # Function to update Modbus input registers from internal state or direct values
-def update_input_registers(rpm=None, vfd_status=None, enc_steps=None, enc_deg=None, fault=None, homing=None, offset=None):
+def update_input_registers(rpm=None, vfd_status=None, enc_steps=None, enc_deg=None, fault=None, homing=None, offset=None, max_rpm=None): # Added max_rpm
     """ Safely updates the Modbus slave input registers. """
     # Access the 'val' key within the register's dictionary
     if rpm is not None:
@@ -173,3 +173,5 @@ def update_input_registers(rpm=None, vfd_status=None, enc_steps=None, enc_deg=No
         slave_registers['IREGS']['homing_flag']['val'] = 1 if homing else 0
     if offset is not None:
         slave_registers['IREGS']['offset_steps']['val'] = offset
+    if max_rpm is not None: # Added logic for max_rpm
+        slave_registers['IREGS']['max_rpm']['val'] = max_rpm
