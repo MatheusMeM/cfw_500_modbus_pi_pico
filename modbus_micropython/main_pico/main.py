@@ -63,23 +63,13 @@ slave_serial_itf = ModbusRTUSerial(
     pins=(SLAVE_TX_PIN_NUM, SLAVE_RX_PIN_NUM),
     ctrl_pin=SLAVE_DE_RE_PIN_NUM
 )
-# 2. Create the Modbus instance, passing the Serial interface and the register map
+# 2. Create the Modbus instance, passing the Serial interface
 modbus_slave_handler = Modbus(
     itf=slave_serial_itf,
     addr_list=[MAIN_PICO_SLAVE_ADDR], # List of slave addresses this instance responds to
 )
 
-# --- Assign Callbacks BEFORE Setup ---
-# Link the command register callback function defined below
-slave_registers['HREGS']['command']['on_set_cb'] = handle_command_register_write
-print_verbose("[INFO] Command register callback assigned to slave_registers dict.", 2)
-
-# 3. Setup the registers using the map from utils (NOW includes the callback)
-modbus_slave_handler.setup_registers(registers=slave_registers)
-
-print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized and registers set up.", 2)
-
-# Network 2: Modbus Master (for VFD)
+# Network 2: Modbus Master (for VFD) - Define vfd_master EARLY
 vfd_de_re_pin = Pin(VFD_DE_RE_PIN_NUM, Pin.OUT) # DE/RE pin object for VFD master
 vfd_master = CFW500Modbus( # Instantiate the VFD control class
     uart_id=VFD_UART_ID,
@@ -89,6 +79,74 @@ vfd_master = CFW500Modbus( # Instantiate the VFD control class
     slave_address=VFD_SLAVE_ADDRESS
 )
 print_verbose("[INFO] Modbus Master (UART0 for VFD) initialized.", 2)
+
+
+# --- Modbus Register Callbacks ---
+# Define the callback function BEFORE it's assigned
+def handle_command_register_write(reg_type, address, val):
+    """
+    Callback executed by umodbus when the command register (HREG 100) is written.
+    Triggers command processing based on the written value.
+    NOTE: This runs in the context of the modbus_slave_poll_task.
+          Keep it relatively quick or schedule longer actions.
+    """
+    # global vfd_master # vfd_master is now defined globally before this function
+
+    # The library might pass a list even for single register writes
+    command_to_process = val[0] if isinstance(val, list) else val
+    print_verbose(f"[DEBUG CB] Command Register Write Detected: Value={command_to_process}", 3)
+
+    if command_to_process != 0:
+        # Read associated target RPM *at the time of the command write*
+        try:
+            target_rpm_val = slave_registers['HREGS']['target_rpm']['val']
+        except Exception as e:
+            print_verbose(f"[ERROR CB] Failed to read target RPM: {e}", 0)
+            target_rpm_val = 0 # Default to 0 on error
+
+        print_verbose(f"[DEBUG CB] Processing Command: {command_to_process}, RPM: {target_rpm_val}", 3)
+
+        # --- Execute Command ---
+        try:
+            if command_to_process == 1: # START
+                vfd_master.start_motor(target_rpm_val)
+                print_verbose(f"[ACTION CB] Motor START processed (RPM: {target_rpm_val}).", 0)
+            elif command_to_process == 2: # STOP
+                vfd_master.stop_motor()
+                print_verbose(f"[ACTION CB] Motor STOP processed.", 0)
+            elif command_to_process == 3: # REVERSE
+                vfd_master.reverse_motor(target_rpm_val)
+                print_verbose(f"[ACTION CB] Motor REVERSE processed (RPM: {target_rpm_val}).", 0)
+            elif command_to_process == 4: # RESET_FAULT
+                vfd_master.reset_fault()
+                print_verbose(f"[ACTION CB] VFD Fault RESET processed.", 0)
+            elif command_to_process == 5: # CALIBRATE
+                current_pos_rel_home = internal_state['encoder_raw_position'] - internal_state['encoder_zero_offset']
+                internal_state['encoder_offset_steps'] = current_pos_rel_home
+                update_input_registers(offset=internal_state['encoder_offset_steps'])
+                save_configuration()
+                print_verbose(f"[ACTION CB] Encoder CALIBRATE processed. New offset: {internal_state['encoder_offset_steps']}", 0)
+
+            # Acknowledge by resetting the command register *in our dictionary*
+            slave_registers['HREGS']['command']['val'] = 0
+            internal_state['last_written_cmd'] = 0
+
+        except Exception as e:
+            print_verbose(f"[ERROR CB] Error processing command {command_to_process}: {e}", 0)
+    else:
+        # Command 0 written, potentially an acknowledgement clear by master.
+        print_verbose(f"[DEBUG CB] Command Register cleared (Value=0 received).", 3)
+        slave_registers['HREGS']['command']['val'] = 0
+        internal_state['last_written_cmd'] = 0
+
+# --- Assign Callbacks BEFORE Setup ---
+slave_registers['HREGS']['command']['on_set_cb'] = handle_command_register_write
+print_verbose("[INFO] Command register callback assigned to slave_registers dict.", 2)
+
+# 3. Setup the registers using the map from utils (NOW includes the callback)
+modbus_slave_handler.setup_registers(registers=slave_registers)
+print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized and registers set up.", 2)
+
 
 # --- Async Events ---
 endstop_event = asyncio.Event()
@@ -233,81 +291,12 @@ async def modbus_slave_poll_task(modbus_handler_obj): # Pass Modbus handler obje
             if internal_state['VERBOSE_LEVEL'] >= 3:
                 cmd_val_after_process = slave_registers['HREGS']['command']['val']
                 print_verbose(f"[DEBUG SLAVE POLL] CMD Reg after process(): {cmd_val_after_process}", 3)
-            # Log if needed for debugging
-            # if result and internal_state['VERBOSE_LEVEL'] >= 3:
-            #     print_verbose(f"[DEBUG] Modbus Slave processed request", 3)
         except Exception as e:
             print_verbose(f"[ERROR] Modbus Slave processing error: {e}", 0)
-            # Consider if specific error handling/recovery is needed here
 
         # Sleep briefly to yield control and define polling rate
         await asyncio.sleep_ms(MODBUS_SLAVE_POLL_INTERVAL_MS)
 
-# --- Modbus Register Callbacks ---
-def handle_command_register_write(reg_type, address, val):
-    """
-    Callback executed by umodbus when the command register (HREG 100) is written.
-    Triggers command processing based on the written value.
-    NOTE: This runs in the context of the modbus_slave_poll_task.
-          Keep it relatively quick or schedule longer actions.
-    """
-    global vfd_master # Need access to the VFD control object
-
-    # The library might pass a list even for single register writes
-    command_to_process = val[0] if isinstance(val, list) else val
-    print_verbose(f"[DEBUG CB] Command Register Write Detected: Value={command_to_process}", 3)
-
-    if command_to_process != 0:
-        # Read associated target RPM *at the time of the command write*
-        # Note: This assumes RPM register (101) was written *before* or *with* the command register (100)
-        try:
-            # Read directly from the library's internal state if possible,
-            # otherwise rely on our potentially stale dictionary value.
-            # For simplicity, we use our dictionary value for now.
-            target_rpm_val = slave_registers['HREGS']['target_rpm']['val']
-        except Exception as e:
-            print_verbose(f"[ERROR CB] Failed to read target RPM: {e}", 0)
-            target_rpm_val = 0 # Default to 0 on error
-
-        print_verbose(f"[DEBUG CB] Processing Command: {command_to_process}, RPM: {target_rpm_val}", 3)
-
-        # --- Execute Command ---
-        try:
-            if command_to_process == 1: # START
-                vfd_master.start_motor(target_rpm_val)
-                print_verbose(f"[ACTION CB] Motor START processed (RPM: {target_rpm_val}).", 0)
-            elif command_to_process == 2: # STOP
-                vfd_master.stop_motor()
-                print_verbose(f"[ACTION CB] Motor STOP processed.", 0)
-            elif command_to_process == 3: # REVERSE
-                vfd_master.reverse_motor(target_rpm_val)
-                print_verbose(f"[ACTION CB] Motor REVERSE processed (RPM: {target_rpm_val}).", 0)
-            elif command_to_process == 4: # RESET_FAULT
-                vfd_master.reset_fault()
-                print_verbose(f"[ACTION CB] VFD Fault RESET processed.", 0)
-            elif command_to_process == 5: # CALIBRATE
-                current_pos_rel_home = internal_state['encoder_raw_position'] - internal_state['encoder_zero_offset']
-                internal_state['encoder_offset_steps'] = current_pos_rel_home
-                update_input_registers(offset=internal_state['encoder_offset_steps'])
-                save_configuration()
-                print_verbose(f"[ACTION CB] Encoder CALIBRATE processed. New offset: {internal_state['encoder_offset_steps']}", 0)
-
-            # Acknowledge by resetting the command register *in our dictionary*
-            # The library handles the Modbus response automatically.
-            # We reset our view so command_processor doesn't re-process if it still checks.
-            # NOTE: This might cause issues if the write happens again before command_processor runs.
-            # Consider removing command_processor check entirely later.
-            slave_registers['HREGS']['command']['val'] = 0
-            # Also reset internal state tracking
-            internal_state['last_written_cmd'] = 0
-
-        except Exception as e:
-            print_verbose(f"[ERROR CB] Error processing command {command_to_process}: {e}", 0)
-    else:
-        # Command 0 written, potentially an acknowledgement clear by master.
-        print_verbose(f"[DEBUG CB] Command Register cleared (Value=0 received).", 3)
-        slave_registers['HREGS']['command']['val'] = 0
-        internal_state['last_written_cmd'] = 0
 
 # --- Main Application Logic ---
 async def main():
@@ -318,8 +307,6 @@ async def main():
     load_configuration()
     # Ensure homing flag is initially false in register
     update_input_registers(homing=False)
-
-    # Callback assignment moved to BEFORE setup_registers above
 
     # Initialize Encoder (uses internal_state, updates slave_registers via callback)
     initialize_encoder(16, 17) # Pins for encoder A, B
