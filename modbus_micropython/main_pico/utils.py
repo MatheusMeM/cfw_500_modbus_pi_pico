@@ -21,6 +21,7 @@ REG_ENC_POS_DEG = 3   # Encoder Position (Degrees x100, relative to calibrated o
 REG_FAULT_FLAG = 4    # VFD Fault Detected Flag (0/1)
 REG_HOMING_FLAG = 5   # Homing Completed Flag (0/1)
 REG_OFFSET_STEPS = 6  # Calibrated Encoder Offset (Steps)
+REG_MAX_RPM = 7     # Configured Max RPM (P0208)
 
 # Define the structure for the Modbus slave registers
 # Format matches the structure expected by umodbus library's setup_registers method
@@ -40,6 +41,7 @@ slave_registers = {
         'fault_flag':       {'register': REG_FAULT_FLAG,   'val': 0},
         'homing_flag':      {'register': REG_HOMING_FLAG,  'val': 0},
         'offset_steps':     {'register': REG_OFFSET_STEPS, 'val': 0},
+        'max_rpm':          {'register': REG_MAX_RPM,      'val': 0}, # Correctly placed inside IREGS
     },
     'COILS': {}, # Not used currently
     'ISTS': {} # Discrete Inputs (ISTS expected by library, was 'discrete_inputs')

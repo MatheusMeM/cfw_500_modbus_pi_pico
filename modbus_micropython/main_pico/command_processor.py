@@ -35,18 +35,23 @@ async def process_modbus_commands(vfd_master):
 
         try:
             if command_to_process == 1: # START
+                print_verbose(f"[DEBUG CMD] Calling vfd_master.start_motor({rpm_to_process})", 3) # ADDED DEBUG
                 vfd_master.start_motor(rpm_to_process)
                 print_verbose(f"[ACTION] Motor START command processed (RPM: {rpm_to_process}).", 0)
             elif command_to_process == 2: # STOP
+                print_verbose(f"[DEBUG CMD] Calling vfd_master.stop_motor()", 3) # ADDED DEBUG
                 vfd_master.stop_motor()
                 print_verbose(f"[ACTION] Motor STOP command processed.", 0)
             elif command_to_process == 3: # REVERSE
+                print_verbose(f"[DEBUG CMD] Calling vfd_master.reverse_motor({rpm_to_process})", 3) # ADDED DEBUG
                 vfd_master.reverse_motor(rpm_to_process)
                 print_verbose(f"[ACTION] Motor REVERSE command processed (RPM: {rpm_to_process}).", 0)
             elif command_to_process == 4: # RESET_FAULT
+                print_verbose(f"[DEBUG CMD] Calling vfd_master.reset_fault()", 3) # ADDED DEBUG
                 vfd_master.reset_fault()
                 print_verbose(f"[ACTION] VFD Fault RESET command processed.", 0)
             elif command_to_process == 5: # CALIBRATE
+                print_verbose(f"[DEBUG CMD] Processing CALIBRATE command", 3) # ADDED DEBUG
                 # Set current position (relative to home) as the new offset
                 current_pos_rel_home = internal_state['encoder_raw_position'] - internal_state['encoder_zero_offset']
                 internal_state['encoder_offset_steps'] = current_pos_rel_home

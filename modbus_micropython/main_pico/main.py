@@ -261,11 +261,12 @@ async def main():
         max_rpm = vfd_master.read_max_rpm()
         if max_rpm:
             print_verbose(f"[INFO] VFD Max RPM: {max_rpm}", 1)
+            # Update the Modbus register with the read value
+            update_input_registers(max_rpm=int(max_rpm)) # Use correct key 'max_rpm' and cast to int
         else:
             print_verbose("[WARNING] Failed to read VFD Max RPM.", 1)
     except Exception as e:
         print_verbose(f"[ERROR] Failed reading VFD Max RPM: {e}", 0)
-
 
     # --- Homing Sequence ---
     # Start background tasks first
