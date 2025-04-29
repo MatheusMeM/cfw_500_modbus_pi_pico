@@ -6,82 +6,60 @@ This document describes the purpose of each key Python file in the `modbus_micro
 
 *   **`main.py`**:
     *   Runs on the Relay Pico.
-    *   Acts as a **Modbus RTU Master** communicating with the Main Pico over RS485 (Network 1 - UART0).
+    *   Acts as a **Modbus RTU Master** communicating with the Main Pico over RS485 (Network 1 - UART0, 115200 baud).
     *   Handles communication with the Host PC via USB Serial.
     *   Reads text commands from the PC.
-    *   Translates PC commands into Modbus write operations (e.g., writing command codes, target RPM) to specific Holding Registers on the Main Pico Slave.
-    *   Periodically reads various Input Registers from the Main Pico Slave (e.g., current RPM, VFD status, encoder position, fault flags) via Modbus read operations.
+    *   Translates PC commands into Modbus write operations (Function Code 06 or 16) to specific Holding Registers (100-103) on the Main Pico Slave.
+    *   Periodically reads multiple Input Registers (0-7) from the Main Pico Slave via Modbus read operations (Function Code 04).
     *   Formats and prints the received status information to the PC via USB Serial.
-    *   Uses the `umodbus` library for Modbus communication.
-
-*   **`lib/umodbus/`**: (Directory to be created/copied)
+    *   Uses the `umodbus` library for Modbus communication. Includes short delays around Modbus calls to aid stability.
+*   **`lib/umodbus/`**:
     *   Contains the `micropython-modbus` library files required for the Relay Pico's Modbus Master functionality.
 
 ## Main Pico (`modbus_micropython/main_pico/`)
 
 *   **`main.py`**:
     *   Runs on the Main Pico.
-    *   The main application entry point, orchestrating operations using `uasyncio`.
-    *   Initializes all hardware components (Pins, UARTs for Modbus).
-    *   Initializes both Modbus roles:
-        *   **Modbus RTU Slave** on UART1 (Network 1) to listen for requests from the Relay Pico Master.
-        *   **Modbus RTU Master** on UART0 (Network 2) to communicate with the VFD Slave.
+    *   Main application entry point using `uasyncio`.
+    *   Initializes hardware (Pins, UARTs).
+    *   Initializes **Modbus RTU Slave** on UART1 (Network 1) via `umodbus.modbus.Modbus` and `umodbus.serial.Serial`. Listens for requests from Relay Master.
+    *   Initializes **Modbus RTU Master** on UART0 (Network 2) via `cfw500_modbus.CFW500Modbus` class for VFD communication.
+    *   Assigns `handle_command_register_write` callback to Holding Register 100 (`command`) *before* calling `setup_registers`. This callback handles action commands (Start, Stop, Reverse, Reset, Calibrate) immediately upon receiving the Modbus write.
     *   Manages background asynchronous tasks:
-        *   Polling VFD status (`vfd_status_request_task`).
-        *   Controlling status relays (`relay_control_task`).
-        *   Processing incoming Modbus Slave requests (`modbus_slave_poll_task`).
-    *   Handles the motor homing sequence.
-    *   Runs the main asynchronous loop, which periodically calls `command_processor.process_modbus_commands`.
-
+        *   `vfd_status_request_task`: Polls VFD status/speed via Modbus Master (Network 2). Updates Input Registers via `utils.update_input_registers`.
+        *   `relay_control_task`: Controls status relays based on fault state.
+        *   `modbus_slave_poll_task`: Periodically calls `modbus_slave_handler.process()` to handle incoming Modbus Slave requests (Network 1). Executes callbacks (like `handle_command_register_write`) within this context.
+    *   Performs initial safety stop and homing sequence.
+    *   Runs the main async loop, periodically calling `command_processor.process_modbus_commands` to handle settings changes.
 *   **`utils.py`**:
-    *   Contains shared utility functions, constants, and data structures for the Main Pico code.
-    *   Defines the **Modbus Slave Register Map** (`slave_registers`) which dictates how the Relay Master interacts with the Main Pico's data.
-    *   Manages the internal application state (`internal_state`), distinct from the Modbus registers but often mirrored to/from them.
-    *   Handles loading and saving persistent configuration to `config.json`.
-    *   Provides the local verbose printing function (`print_verbose`).
-    *   Includes helper functions like `update_input_registers` to safely update the Modbus input registers exposed to the Relay Master.
-
-*   **`command_processor.py`**: (New file)
-    *   Encapsulates the logic for acting upon commands received via Modbus from the Relay Master.
-    *   Reads the relevant Modbus Holding Registers (e.g., `REG_CMD`, `REG_TARGET_RPM`, `REG_VERBOSE`, `REG_ENC_MODE`).
-    *   Detects changes or specific command codes written by the Relay Master.
-    *   Executes the corresponding actions, such as:
-        *   Calling methods on the VFD Master object (`vfd_master`) to start/stop/reverse the motor or reset faults.
-        *   Triggering the encoder calibration process.
-        *   Updating internal settings (`internal_state`) like verbosity or encoder mode.
-    *   Resets the command register after processing.
-
+    *   Contains shared utility functions, constants, and data structures.
+    *   Defines the **Modbus Slave Register Map** (`slave_registers`) dictionary (Holding Regs 100-103, Input Regs 0-7).
+    *   Defines the `internal_state` dictionary for non-Modbus state variables.
+    *   Handles loading/saving persistent configuration (`config.json`).
+    *   Provides `print_verbose` for local conditional printing.
+    *   Provides `update_input_registers` helper to safely update values in the `slave_registers['IREGS']` dictionary, which are then read by the Relay Master.
+*   **`command_processor.py`**:
+    *   Contains `process_modbus_commands` async function.
+    *   Called periodically by `main.py`'s main loop.
+    *   Reads **settings** Holding Registers (`verbosity_level`, `encoder_mode`) from the `slave_registers` dictionary.
+    *   Compares read values to `internal_state` and updates `internal_state` and `config.json` if changes are detected.
+    *   **Does NOT handle action commands (Start/Stop etc.)** - these are handled by the callback in `main.py`.
 *   **`cfw500_modbus.py`**:
     *   Defines the `CFW500Modbus` class.
-    *   Encapsulates the Modbus RTU **Master** communication logic specifically for interacting with the WEG CFW500 VFD (Network 2 - UART0).
-    *   Provides methods for reading VFD parameters (speed, status, max RPM, etc.) and writing control words or speed references to the VFD.
-
+    *   Encapsulates Modbus RTU **Master** logic for VFD communication (Network 2).
+    *   Provides methods like `start_motor`, `stop_motor`, `read_current_speed`, `check_fault`, etc.
 *   **`encoder_module.py`**:
     *   Initializes the low-level encoder driver (`encoder.py`).
-    *   Defines the `encoder_callback` function which is executed upon encoder movement.
-    *   Processes the raw encoder steps provided by the driver.
-    *   Applies homing and calibration offsets (`internal_state['encoder_zero_offset']`, `internal_state['encoder_offset_steps']`).
-    *   Calculates the final position in steps and degrees.
-    *   Updates the corresponding Modbus Input Registers (`slave_registers['input'][REG_ENC_POS_STEPS]`, `slave_registers['input'][REG_ENC_POS_DEG]`) via `update_input_registers`.
-    *   Updates `internal_state` variables related to the encoder.
-
+    *   Defines the `encoder_callback` function triggered by `encoder.py`.
+    *   Processes raw steps, applies offsets (`encoder_zero_offset`, `encoder_offset_steps`).
+    *   Calculates final steps/degrees.
+    *   Calls `update_input_registers` in `utils.py` to update the corresponding Modbus Input Registers.
 *   **`encoder.py`**:
-    *   The low-level asynchronous quadrature encoder driver (based on Peter Hinch's library).
-    *   Uses hardware pin interrupts (`Pin.IRQ_RISING | Pin.IRQ_FALLING`) to detect encoder rotation.
-    *   Counts raw steps and triggers the `encoder_callback` in `encoder_module.py` via `uasyncio`.
-
+    *   Low-level asynchronous quadrature encoder driver using pin interrupts.
 *   **`lib/umodbus/`**:
-    *   Contains the `micropython-modbus` library files. Used by both the `ModbusRTUSlave` instance (Network 1) and the `CFW500Modbus` class (which uses `ModbusRTUMaster` internally, Network 2).
-
+    *   Contains `micropython-modbus` library files. Used by both Slave (Network 1) and Master (Network 2 via `cfw500_modbus.py`).
 *   **`config.json`**:
-    *   Stores persistent configuration values (currently `encoder_offset_steps`, `encoder_output_mode`, `VERBOSE_LEVEL`) for the Main Pico, loaded/saved by `utils.py`.
+    *   Stores persistent configuration (`encoder_offset_steps`, `encoder_output_mode`, `VERBOSE_LEVEL`).
 
-*   **~~`motor_control.py`~~**: **(Redundant)**
-    *   This file previously contained only an initialization function for the `CFW500Modbus` class.
-    *   This initialization is now done directly within `main.py`.
-    *   **This file should be deleted.**
-
-*   **~~`commands.py`~~**: **(Redundant)**
-    *   This file previously handled parsing text commands received via direct UART.
-    *   Command handling is now done by `command_processor.py` by reading Modbus registers.
-    *   **This file should be deleted.** (Assuming it was successfully deleted earlier).
+*   **~~`motor_control.py`~~**: **(Redundant/Deleted)**
+*   **~~`commands.py`~~**: **(Redundant/Deleted)**
