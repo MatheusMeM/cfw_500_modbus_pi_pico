@@ -42,7 +42,7 @@ RELAY_PIN2_NUM = 21
 # Timing
 STATUS_REQUEST_INTERVAL_MS = 5000 # VFD status check interval
 RELAY_CONTROL_INTERVAL_MS = 1000 # Relay update interval
-MODBUS_SLAVE_POLL_INTERVAL_MS = 10 # How often to check for slave requests
+MODBUS_SLAVE_POLL_INTERVAL_MS = 200 # How often to check for slave requests (Increased from 10ms)
 MAIN_LOOP_SLEEP_MS = 20 # Main loop sleep
 
 # --- Hardware Initialization ---
@@ -307,16 +307,23 @@ async def relay_control_task():
 
 async def modbus_slave_poll_task(modbus_handler_obj): # Pass Modbus handler object
     """ Periodically processes incoming Modbus slave requests. """
+    debug_print_counter = 0
+    # Print approx every 20 seconds (200ms interval * 100 polls)
+    debug_print_interval = 100
     while True:
         try:
             # process() checks for incoming requests via the serial interface
             # and handles them based on the configured register map.
             # Callbacks (like handle_command_register_write) are executed within process()
             result = modbus_handler_obj.process()
-            # ADDED DEBUG: Check register value immediately after process()
+            # ADDED DEBUG: Check register value immediately after process() - Reduced Frequency
             if internal_state['VERBOSE_LEVEL'] >= 3:
-                cmd_val_after_process = slave_registers['HREGS']['command']['val']
-                print_verbose(f"[DEBUG SLAVE POLL] CMD Reg after process(): {cmd_val_after_process}", 3)
+                debug_print_counter += 1
+                if debug_print_counter >= debug_print_interval:
+                    debug_print_counter = 0
+                    cmd_val_after_process = slave_registers['HREGS']['command']['val']
+                    # This print confirms the poll task is running, even if no commands received
+                    print_verbose(f"[DEBUG SLAVE POLL] Task running (CMD Reg: {cmd_val_after_process})", 3)
         except Exception as e:
             print_verbose(f"[ERROR] Modbus Slave processing error: {e}", 0)
 
@@ -390,10 +397,9 @@ async def main():
 
     # --- Main Execution Loop ---
     while True:
-        # Process non-command settings changes (like verbosity, encoder mode)
-        # Command processing is now handled by the callback
-        # Temporarily comment out settings processing to isolate callback issue
-        # await process_modbus_commands(vfd_master) # Pass the vfd_master instance
+        # Command processing is handled by the callback
+        # Process settings changes from Modbus:
+        await process_modbus_commands(vfd_master) # Pass the vfd_master instance
 
         # Main loop sleep (still needed to allow other tasks to run)
         await asyncio.sleep_ms(MAIN_LOOP_SLEEP_MS)
