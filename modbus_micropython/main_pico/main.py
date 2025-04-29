@@ -68,10 +68,16 @@ modbus_slave_handler = Modbus(
     itf=slave_serial_itf,
     addr_list=[MAIN_PICO_SLAVE_ADDR], # List of slave addresses this instance responds to
 )
-# 3. Setup the registers using the map from utils
+
+# --- Assign Callbacks BEFORE Setup ---
+# Link the command register callback function defined below
+slave_registers['HREGS']['command']['on_set_cb'] = handle_command_register_write
+print_verbose("[INFO] Command register callback assigned to slave_registers dict.", 2)
+
+# 3. Setup the registers using the map from utils (NOW includes the callback)
 modbus_slave_handler.setup_registers(registers=slave_registers)
 
-print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized.", 2)
+print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized and registers set up.", 2)
 
 # Network 2: Modbus Master (for VFD)
 vfd_de_re_pin = Pin(VFD_DE_RE_PIN_NUM, Pin.OUT) # DE/RE pin object for VFD master
@@ -313,10 +319,7 @@ async def main():
     # Ensure homing flag is initially false in register
     update_input_registers(homing=False)
 
-    # Link the command register callback function defined above
-    # This MUST be done before starting the slave poll task
-    slave_registers['HREGS']['command']['on_set_cb'] = handle_command_register_write
-    print_verbose("[INFO] Command register callback linked.", 2)
+    # Callback assignment moved to BEFORE setup_registers above
 
     # Initialize Encoder (uses internal_state, updates slave_registers via callback)
     initialize_encoder(16, 17) # Pins for encoder A, B
@@ -376,9 +379,10 @@ async def main():
     while True:
         # Process non-command settings changes (like verbosity, encoder mode)
         # Command processing is now handled by the callback
-        await process_modbus_commands(vfd_master) # Pass the vfd_master instance
+        # Temporarily comment out settings processing to isolate callback issue
+        # await process_modbus_commands(vfd_master) # Pass the vfd_master instance
 
-        # Main loop sleep
+        # Main loop sleep (still needed to allow other tasks to run)
         await asyncio.sleep_ms(MAIN_LOOP_SLEEP_MS)
 
 # --- Run ---

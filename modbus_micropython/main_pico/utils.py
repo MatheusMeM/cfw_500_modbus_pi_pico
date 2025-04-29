@@ -28,7 +28,7 @@ REG_MAX_RPM = 7     # Configured Max RPM (P0208)
 slave_registers = {
     # register_name: {'register': address, 'val': initial_value, 'on_set_cb': ..., 'on_get_cb': ...}
     'HREGS': { # Holding Registers (Writeable by Relay Master)
-        'command':          {'register': REG_CMD,          'val': 0, 'on_set_cb': None}, # Add on_set_cb placeholder
+        'command':          {'register': REG_CMD,          'val': 0}, # on_set_cb will be assigned in main.py before setup
         'target_rpm':       {'register': REG_TARGET_RPM,   'val': 0},
         'verbosity_level':  {'register': REG_VERBOSE,      'val': 1}, # Default verbosity
         'encoder_mode':     {'register': REG_ENC_MODE,     'val': 1}, # Default 'deg'
