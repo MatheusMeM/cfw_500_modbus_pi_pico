@@ -13,8 +13,8 @@ from utils import (
     REG_CMD, REG_TARGET_RPM, REG_VERBOSE, REG_ENC_MODE, REG_OFFSET_STEPS,
     REG_FAULT_FLAG, REG_HOMING_FLAG
 )
-from umodbus.serial import Serial as ModbusRTUMaster # For VFD (if not using CFW500Modbus class directly)
-from umodbus.serial import ModbusRTUSlave # For Relay comms
+from umodbus.serial import Serial as ModbusRTUSerial # Renamed for clarity, handles serial comms
+from umodbus.modbus import Modbus # Base class for register handling
 
 # --- Constants ---
 # Network 1: Relay (Master) <-> Main (Slave) - UART1
@@ -56,15 +56,22 @@ relay_pin2 = Pin(RELAY_PIN2_NUM, Pin.OUT, value=0)
 # --- Modbus Initialization ---
 # Network 1: Modbus Slave (for Relay Master)
 slave_de_re_pin = Pin(SLAVE_DE_RE_PIN_NUM, Pin.OUT)
-modbus_slave_for_relay = ModbusRTUSlave(
-    pins=(SLAVE_TX_PIN_NUM, SLAVE_RX_PIN_NUM),
-    baudrate=SLAVE_BAUDRATE,
-    ctrl_pin=SLAVE_DE_RE_PIN_NUM, # Use pin number directly
+# 1. Create the Serial interface instance for the slave UART
+slave_serial_itf = ModbusRTUSerial(
     uart_id=SLAVE_UART_ID,
-    slave_addr=MAIN_PICO_SLAVE_ADDR,
-    register_map=slave_registers # Use the map defined in utils
+    baudrate=SLAVE_BAUDRATE,
+    pins=(SLAVE_TX_PIN_NUM, SLAVE_RX_PIN_NUM),
+    ctrl_pin=SLAVE_DE_RE_PIN_NUM
 )
-print_verbose("[INFO] Modbus Slave (UART1 for Relay) initialized.", 2)
+# 2. Create the Modbus instance, passing the Serial interface and the register map
+modbus_slave_handler = Modbus(
+    itf=slave_serial_itf,
+    addr_list=[MAIN_PICO_SLAVE_ADDR], # List of slave addresses this instance responds to
+)
+# 3. Setup the registers using the map from utils
+modbus_slave_handler.setup_registers(registers=slave_registers)
+
+print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized.", 2)
 
 # Network 2: Modbus Master (for VFD)
 vfd_de_re_pin = Pin(VFD_DE_RE_PIN_NUM, Pin.OUT) # DE/RE pin object for VFD master
@@ -208,15 +215,16 @@ async def relay_control_task():
             relay_pin2.on()
             await asyncio.sleep_ms(RELAY_CONTROL_INTERVAL_MS) # Check state less frequently if ok
 
-async def modbus_slave_poll_task(modbus_slave_obj): # Pass slave object
+async def modbus_slave_poll_task(modbus_handler_obj): # Pass Modbus handler object
     """ Periodically processes incoming Modbus slave requests. """
     while True:
         try:
-            # process() checks for incoming requests and handles them based on register_map
-            result = modbus_slave_obj.process()
-            # No need to log successful processing unless debugging slave issues
+            # process() checks for incoming requests via the serial interface
+            # and handles them based on the configured register map.
+            result = modbus_handler_obj.process()
+            # Log if needed for debugging
             # if result and internal_state['VERBOSE_LEVEL'] >= 3:
-            #      print_verbose(f"[DEBUG] Modbus Slave processed: {result}", 3)
+            #     print_verbose(f"[DEBUG] Modbus Slave processed request", 3)
         except Exception as e:
             print_verbose(f"[ERROR] Modbus Slave processing error: {e}", 0)
             # Consider if specific error handling/recovery is needed here
@@ -263,7 +271,7 @@ async def main():
     # Start background tasks first
     status_task = asyncio.create_task(vfd_status_request_task(vfd_master))
     relay_task = asyncio.create_task(relay_control_task())
-    slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_for_relay))
+    slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_handler)) # Pass the handler instance
     await asyncio.sleep_ms(100) # Let tasks start
 
     # Temporarily cancel background tasks during homing
@@ -282,7 +290,7 @@ async def main():
     print_verbose("[DEBUG] Restarting background tasks after homing...", 3)
     status_task = asyncio.create_task(vfd_status_request_task(vfd_master))
     relay_task = asyncio.create_task(relay_control_task())
-    slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_for_relay))
+    slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_handler)) # Pass the handler instance
     # --- End Homing Sequence ---
 
     print_verbose("[INFO] Main loop started. System operational.", 0)
