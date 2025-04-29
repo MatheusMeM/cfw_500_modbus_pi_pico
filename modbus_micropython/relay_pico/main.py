@@ -41,7 +41,8 @@ modbus_master = ModbusRTUMaster(
     baudrate=RS485_BAUDRATE,
     # Default bits=8, parity=None, stop=1 should be suitable
     ctrl_pin=RS485_DE_RE_PIN_NUM,
-    uart_id=RS485_UART_ID
+    uart_id=RS485_UART_ID,
+    timeout=500 # Explicitly set timeout to 500ms
 )
 
 print("[INFO] Relay Pico initialized as Modbus Master. Waiting for communication...")
@@ -72,34 +73,48 @@ def run_master():
                     if cmd == "start":
                         rpm = int(parts[1]) if len(parts) > 1 else 1000
                         print(f"[MODBUS TX] Writing START command and RPM={rpm}")
+                        time.sleep_ms(20) # Delay before write
                         modbus_master.write_multiple_registers(MAIN_PICO_SLAVE_ADDR, REG_CMD, [1, rpm])
+                        time.sleep_ms(20) # Delay after write
                     elif cmd == "stop":
                         print(f"[MODBUS TX] Writing STOP command")
+                        time.sleep_ms(20) # Delay before write
                         modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_CMD, 2)
+                        time.sleep_ms(20) # Delay after write
                     elif cmd == "reverse":
                         rpm = int(parts[1]) if len(parts) > 1 else 1000
                         print(f"[MODBUS TX] Writing REVERSE command and RPM={rpm}")
+                        time.sleep_ms(20) # Delay before write
                         modbus_master.write_multiple_registers(MAIN_PICO_SLAVE_ADDR, REG_CMD, [3, rpm])
+                        time.sleep_ms(20) # Delay after write
                     elif cmd == "set_speed":
                          if len(parts) > 1:
                             rpm = int(parts[1])
                             print(f"[MODBUS TX] Writing Target RPM={rpm}")
                             # Send command 0 (no action) but update RPM
+                            time.sleep_ms(20) # Delay before write
                             modbus_master.write_multiple_registers(MAIN_PICO_SLAVE_ADDR, REG_CMD, [0, rpm])
+                            time.sleep_ms(20) # Delay after write
                          else:
                              print("[ERROR] Specify RPM for set_speed")
                     elif cmd == "reset_fault":
                         print(f"[MODBUS TX] Writing RESET_FAULT command")
+                        time.sleep_ms(20) # Delay before write
                         modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_CMD, 4)
+                        time.sleep_ms(20) # Delay after write
                     elif cmd == "calibrate":
                         print(f"[MODBUS TX] Writing CALIBRATE command")
+                        time.sleep_ms(20) # Delay before write
                         modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_CMD, 5)
+                        time.sleep_ms(20) # Delay after write
                     elif cmd == "set_verbose":
                         if len(parts) > 1:
                             level = int(parts[1])
                             if 0 <= level <= 3:
                                 print(f"[MODBUS TX] Writing Verbosity Level={level}")
+                                time.sleep_ms(20) # Delay before write
                                 modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_VERBOSE, level)
+                                time.sleep_ms(20) # Delay after write
                             else:
                                 print("[ERROR] Verbosity level must be 0-3")
                         else:
@@ -110,7 +125,9 @@ def run_master():
                             mode_val = 0 if mode_str == "step" else 1 if mode_str == "deg" else -1
                             if mode_val != -1:
                                 print(f"[MODBUS TX] Writing Encoder Mode={mode_val} ({mode_str})")
+                                time.sleep_ms(20) # Delay before write
                                 modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_ENC_MODE, mode_val)
+                                time.sleep_ms(20) # Delay after write
                             else:
                                 print("[ERROR] Invalid encoder mode. Use 'step' or 'deg'")
                          else:
@@ -138,11 +155,13 @@ def run_master():
             try:
                 # Read multiple input registers in one go
                 print("[MODBUS RX] Reading status registers from Main Pico...")
+                time.sleep_ms(20) # Delay before read
                 input_regs = modbus_master.read_input_registers(
                     slave_addr=MAIN_PICO_SLAVE_ADDR,
                     starting_addr=REG_CURRENT_RPM,
                     register_qty=7 # Read all defined input registers
                 )
+                time.sleep_ms(20) # Delay after read attempt
 
                 if input_regs:
                     # Process and print received data to PC (USB)
