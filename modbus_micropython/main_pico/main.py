@@ -222,6 +222,10 @@ async def modbus_slave_poll_task(modbus_handler_obj): # Pass Modbus handler obje
             # process() checks for incoming requests via the serial interface
             # and handles them based on the configured register map.
             result = modbus_handler_obj.process()
+            # ADDED DEBUG: Check register value immediately after process()
+            if internal_state['VERBOSE_LEVEL'] >= 3:
+                cmd_val_after_process = slave_registers['HREGS']['command']['val']
+                print_verbose(f"[DEBUG SLAVE POLL] CMD Reg after process(): {cmd_val_after_process}", 3)
             # Log if needed for debugging
             # if result and internal_state['VERBOSE_LEVEL'] >= 3:
             #     print_verbose(f"[DEBUG] Modbus Slave processed request", 3)
