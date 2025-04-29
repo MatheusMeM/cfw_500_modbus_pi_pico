@@ -2,7 +2,7 @@
 
 import uasyncio as asyncio
 from utils import (
-    print_verbose, internal_state, slave_registers, update_input_registers,
+    print_verbose, internal_state, slave_registers, update_input_registers, # update_input_registers might not be needed here but keep for consistency
     save_configuration,
     REG_CMD, REG_TARGET_RPM, REG_VERBOSE, REG_ENC_MODE, REG_OFFSET_STEPS
 )
@@ -16,11 +16,19 @@ async def process_modbus_commands(vfd_master): # vfd_master might not be needed 
     `handle_command_register_write` in main.py.
     Should be called periodically from the main async loop.
     """
+    print_verbose("[DEBUG SETTINGS] process_modbus_commands called", 3) # Add entry debug print
+
     # Read current values from the register dictionary
-    # cmd_reg_val = slave_registers['HREGS']['command']['val'] # No longer needed here
-    # target_rpm_val = slave_registers['HREGS']['target_rpm']['val'] # No longer needed here
-    verbose_reg_val = slave_registers['HREGS']['verbosity_level']['val']
-    enc_mode_reg_val = slave_registers['HREGS']['encoder_mode']['val']
+    # Note: Accessing '.val' directly assumes the slave task keeps the dict updated.
+    try:
+        # cmd_reg_val = slave_registers['HREGS']['command']['val'] # Action commands handled by callback
+        # target_rpm_val = slave_registers['HREGS']['target_rpm']['val'] # Action commands handled by callback
+        verbose_reg_val = slave_registers['HREGS']['verbosity_level']['val']
+        enc_mode_reg_val = slave_registers['HREGS']['encoder_mode']['val']
+        print_verbose(f"[DEBUG SETTINGS] Read HREGS: Verbose={verbose_reg_val}, EncMode={enc_mode_reg_val}", 3)
+    except KeyError as e:
+        print_verbose(f"[ERROR SETTINGS] Missing key in slave_registers: {e}", 0)
+        return # Exit if we can't read registers
 
     # --- Process Action Commands (REG_CMD) ---
     # This section is removed as it's handled by the callback handle_command_register_write

@@ -53,7 +53,7 @@ poller.register(sys.stdin, uselect.POLLIN) # Poll USB input
 # --- Main Loop ---
 def run_master():
     last_status_read_time = time.ticks_ms()
-    status_read_interval = 1000 # Read status from Main Pico every 1 second (ms)
+    status_read_interval = 5000 # Read status from Main Pico every 5 seconds (ms) - Increased
 
     while True:
         # --- Check for commands from PC (USB) ---
