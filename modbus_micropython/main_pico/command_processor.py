@@ -14,10 +14,11 @@ async def process_modbus_commands(vfd_master):
     and executes corresponding actions.
     Should be called periodically from the main async loop.
     """
-    cmd_reg_val = slave_registers['holding'][REG_CMD]
-    target_rpm_val = slave_registers['holding'][REG_TARGET_RPM]
-    verbose_reg_val = slave_registers['holding'][REG_VERBOSE]
-    enc_mode_reg_val = slave_registers['holding'][REG_ENC_MODE]
+    # Read current values from the register dictionary
+    cmd_reg_val = slave_registers['HREGS']['command']['val']
+    target_rpm_val = slave_registers['HREGS']['target_rpm']['val']
+    verbose_reg_val = slave_registers['HREGS']['verbosity_level']['val']
+    enc_mode_reg_val = slave_registers['HREGS']['encoder_mode']['val']
 
     # --- Process Action Commands (REG_CMD) ---
     # Check if command register has a new non-zero value
@@ -27,8 +28,8 @@ async def process_modbus_commands(vfd_master):
         internal_state['last_written_cmd'] = command_to_process
         internal_state['last_written_rpm'] = rpm_to_process # Store RPM associated with command
 
-        # Reset command register to 0 immediately after reading to acknowledge
-        slave_registers['holding'][REG_CMD] = 0
+        # Reset command register value to 0 immediately after reading to acknowledge
+        slave_registers['HREGS']['command']['val'] = 0
 
         print_verbose(f"[DEBUG] Processing Modbus Command: {command_to_process}, RPM: {rpm_to_process}", 3)
 
@@ -67,7 +68,7 @@ async def process_modbus_commands(vfd_master):
         else:
             # Invalid value written by master, log and optionally write back valid value
             print_verbose(f"[WARNING] Invalid verbose level {verbose_reg_val} received via Modbus. Ignoring.", 1)
-            slave_registers['holding'][REG_VERBOSE] = internal_state['VERBOSE_LEVEL'] # Write back
+            slave_registers['HREGS']['verbosity_level']['val'] = internal_state['VERBOSE_LEVEL'] # Write back
 
     # Check Encoder Mode
     current_mode_val = 0 if internal_state['encoder_output_mode'] == "step" else 1
@@ -79,7 +80,7 @@ async def process_modbus_commands(vfd_master):
         else:
             # Invalid value written by master, log and optionally write back valid value
             print_verbose(f"[WARNING] Invalid encoder mode {enc_mode_reg_val} received via Modbus. Ignoring.", 1)
-            slave_registers['holding'][REG_ENC_MODE] = current_mode_val # Write back
+            slave_registers['HREGS']['encoder_mode']['val'] = current_mode_val # Write back
 
     # Check for direct RPM change without START/REVERSE command (like set_speed)
     # Only process if command is currently 0 (idle) to avoid conflict

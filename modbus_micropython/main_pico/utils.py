@@ -23,26 +23,26 @@ REG_HOMING_FLAG = 5   # Homing Completed Flag (0/1)
 REG_OFFSET_STEPS = 6  # Calibrated Encoder Offset (Steps)
 
 # Define the structure for the Modbus slave registers
-# Initialize with default/placeholder values
+# Format matches the structure expected by umodbus library's setup_registers method
 slave_registers = {
-    # addr: value
-    'holding': {
-        REG_CMD: 0,
-        REG_TARGET_RPM: 0,
-        REG_VERBOSE: 1, # Default verbosity
-        REG_ENC_MODE: 1, # Default 'deg'
+    # register_name: {'register': address, 'val': initial_value, 'on_set_cb': ..., 'on_get_cb': ...}
+    'HREGS': { # Holding Registers (Writeable by Relay Master)
+        'command':          {'register': REG_CMD,          'val': 0},
+        'target_rpm':       {'register': REG_TARGET_RPM,   'val': 0},
+        'verbosity_level':  {'register': REG_VERBOSE,      'val': 1}, # Default verbosity
+        'encoder_mode':     {'register': REG_ENC_MODE,     'val': 1}, # Default 'deg'
     },
-    'input': {
-        REG_CURRENT_RPM: 0,
-        REG_VFD_STATUS: 0,
-        REG_ENC_POS_STEPS: 0,
-        REG_ENC_POS_DEG: 0,
-        REG_FAULT_FLAG: 0,
-        REG_HOMING_FLAG: 0,
-        REG_OFFSET_STEPS: 0,
+    'IREGS': { # Input Registers (Readable by Relay Master)
+        'current_rpm':      {'register': REG_CURRENT_RPM,  'val': 0},
+        'vfd_status':       {'register': REG_VFD_STATUS,   'val': 0},
+        'encoder_steps':    {'register': REG_ENC_POS_STEPS,'val': 0},
+        'encoder_degrees':  {'register': REG_ENC_POS_DEG,  'val': 0},
+        'fault_flag':       {'register': REG_FAULT_FLAG,   'val': 0},
+        'homing_flag':      {'register': REG_HOMING_FLAG,  'val': 0},
+        'offset_steps':     {'register': REG_OFFSET_STEPS, 'val': 0},
     },
-    'coils': {}, # Not used currently
-    'discrete_inputs': {} # Not used currently
+    'COILS': {}, # Not used currently
+    'ISTS': {} # Discrete Inputs (ISTS expected by library, was 'discrete_inputs')
 }
 
 # Global Variables for shared internal state (distinct from Modbus registers)
@@ -126,9 +126,9 @@ def load_configuration():
         internal_state['VERBOSE_LEVEL'] = config.get("VERBOSE_LEVEL", 1)
 
         # Update corresponding slave registers after loading internal state
-        slave_registers['holding'][REG_VERBOSE] = internal_state['VERBOSE_LEVEL']
-        slave_registers['holding'][REG_ENC_MODE] = 0 if internal_state['encoder_output_mode'] == "step" else 1
-        slave_registers['input'][REG_OFFSET_STEPS] = internal_state['encoder_offset_steps'] # Make offset readable
+        slave_registers['HREGS']['verbosity_level']['val'] = internal_state['VERBOSE_LEVEL']
+        slave_registers['HREGS']['encoder_mode']['val'] = 0 if internal_state['encoder_output_mode'] == "step" else 1
+        slave_registers['IREGS']['offset_steps']['val'] = internal_state['encoder_offset_steps'] # Make offset readable
 
         print_verbose(f"[INFO] Loaded config: Offset={internal_state['encoder_offset_steps']}, Mode='{internal_state['encoder_output_mode']}', Verbose={internal_state['VERBOSE_LEVEL']}", 0) # Local print
     except FileNotFoundError:
@@ -138,9 +138,9 @@ def load_configuration():
         internal_state['encoder_output_mode'] = "deg"
         internal_state['VERBOSE_LEVEL'] = 1
         # Update registers with defaults
-        slave_registers['holding'][REG_VERBOSE] = 1
-        slave_registers['holding'][REG_ENC_MODE] = 1
-        slave_registers['input'][REG_OFFSET_STEPS] = 0
+        slave_registers['HREGS']['verbosity_level']['val'] = 1
+        slave_registers['HREGS']['encoder_mode']['val'] = 1
+        slave_registers['IREGS']['offset_steps']['val'] = 0
     except Exception as e:
         print_verbose(f"[ERROR] Failed to load configuration: {e}", 0) # Local print
         # Ensure defaults match internal_state definition on error
@@ -148,26 +148,26 @@ def load_configuration():
         internal_state['encoder_output_mode'] = "deg"
         internal_state['VERBOSE_LEVEL'] = 1
         # Update registers with defaults
-        slave_registers['holding'][REG_VERBOSE] = 1
-        slave_registers['holding'][REG_ENC_MODE] = 1
-        slave_registers['input'][REG_OFFSET_STEPS] = 0
+        slave_registers['HREGS']['verbosity_level']['val'] = 1
+        slave_registers['HREGS']['encoder_mode']['val'] = 1
+        slave_registers['IREGS']['offset_steps']['val'] = 0
 
 # Function to update Modbus input registers from internal state or direct values
 def update_input_registers(rpm=None, vfd_status=None, enc_steps=None, enc_deg=None, fault=None, homing=None, offset=None):
     """ Safely updates the Modbus slave input registers. """
-    global slave_registers
+    # Access the 'val' key within the register's dictionary
     if rpm is not None:
-        slave_registers['input'][REG_CURRENT_RPM] = int(rpm * 10) # Scale RPM
+        slave_registers['IREGS']['current_rpm']['val'] = int(rpm * 10) # Scale RPM
     if vfd_status is not None:
-        slave_registers['input'][REG_VFD_STATUS] = vfd_status
+        slave_registers['IREGS']['vfd_status']['val'] = vfd_status
     if enc_steps is not None:
         # Handle potential signed value if necessary, assuming unsigned for now
-        slave_registers['input'][REG_ENC_POS_STEPS] = enc_steps
+        slave_registers['IREGS']['encoder_steps']['val'] = enc_steps
     if enc_deg is not None:
-        slave_registers['input'][REG_ENC_POS_DEG] = int(enc_deg * 100) # Scale Degrees
+        slave_registers['IREGS']['encoder_degrees']['val'] = int(enc_deg * 100) # Scale Degrees
     if fault is not None:
-        slave_registers['input'][REG_FAULT_FLAG] = 1 if fault else 0
+        slave_registers['IREGS']['fault_flag']['val'] = 1 if fault else 0
     if homing is not None:
-        slave_registers['input'][REG_HOMING_FLAG] = 1 if homing else 0
+        slave_registers['IREGS']['homing_flag']['val'] = 1 if homing else 0
     if offset is not None:
-        slave_registers['input'][REG_OFFSET_STEPS] = offset
+        slave_registers['IREGS']['offset_steps']['val'] = offset
