@@ -10,7 +10,7 @@ from umodbus.serial import Serial as ModbusRTUMaster # Assuming library is in li
 # Network 1: Relay (Master) <-> Main (Slave)
 MAIN_PICO_SLAVE_ADDR = 1
 RS485_UART_ID = 0
-RS485_BAUDRATE = 115200 # Ensure this matches Main Pico's UART1
+RS485_BAUDRATE = 19200 # Ensure this matches Main Pico's UART1 - REDUCED for testing
 RS485_TX_PIN_NUM = 0  # GPIO0
 RS485_RX_PIN_NUM = 1  # GPIO1
 RS485_DE_RE_PIN_NUM = 2 # GPIO2

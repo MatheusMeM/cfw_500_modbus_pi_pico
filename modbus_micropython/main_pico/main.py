@@ -19,7 +19,7 @@ from umodbus.modbus import Modbus # Base class for register handling
 # --- Constants ---
 # Network 1: Relay (Master) <-> Main (Slave) - UART1
 SLAVE_UART_ID = 1
-SLAVE_BAUDRATE = 115200 # Match Relay Pico
+SLAVE_BAUDRATE = 19200 # Match Relay Pico - REDUCED for testing
 SLAVE_TX_PIN_NUM = 4  # GPIO4
 SLAVE_RX_PIN_NUM = 5  # GPIO5
 SLAVE_DE_RE_PIN_NUM = 6 # GPIO6
@@ -307,11 +307,13 @@ async def relay_control_task():
 
 async def modbus_slave_poll_task(modbus_handler_obj): # Pass Modbus handler object
     """ Periodically processes incoming Modbus slave requests. """
+    print_verbose("[DEBUG SLAVE POLL TASK] Starting...", 3) # Added start message
     debug_print_counter = 0
     # Print approx every 20 seconds (200ms interval * 100 polls)
     debug_print_interval = 100
     while True:
         try:
+            print_verbose("[DEBUG SLAVE POLL TASK] Polling...", 3) # Added polling message
             # process() checks for incoming requests via the serial interface
             # and handles them based on the configured register map.
             # Callbacks (like handle_command_register_write) are executed within process()
@@ -342,7 +344,8 @@ async def main():
     update_input_registers(homing=False)
 
     # Initialize Encoder (uses internal_state, updates slave_registers via callback)
-    initialize_encoder(16, 17) # Pins for encoder A, B
+    # initialize_encoder(16, 17) # Pins for encoder A, B - DISABLED FOR STEP 1.1 TEST
+    print_verbose("[INFO TEST] Encoder Disabled.", 0)
 
     # --- Safety Stop ---
     try:
@@ -369,31 +372,35 @@ async def main():
 
     # --- Homing Sequence ---
     # Start background tasks first
-    status_task = asyncio.create_task(vfd_status_request_task(vfd_master))
-    relay_task = asyncio.create_task(relay_control_task())
-    slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_handler)) # Pass the handler instance
-    await asyncio.sleep_ms(100) # Let tasks start
+    # status_task = asyncio.create_task(vfd_status_request_task(vfd_master)) # DISABLED FOR STEP 1.1 TEST
+    # relay_task = asyncio.create_task(relay_control_task()) # DISABLED FOR STEP 1.1 TEST
+    slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_handler)) # Start ONLY the slave poll task
+    print_verbose("[INFO TEST] VFD Status Task Disabled.", 0)
+    print_verbose("[INFO TEST] Relay Control Task Disabled.", 0)
+    await asyncio.sleep_ms(100) # Let slave poll task start
 
+    # --- Homing Sequence DISABLED FOR STEP 1.1 TEST ---
     # Temporarily cancel background tasks during homing
-    print_verbose("[DEBUG] Cancelling background tasks for homing...", 3)
-    status_task.cancel()
-    relay_task.cancel()
-    slave_poll_task.cancel() # Also cancel slave polling during homing
-    try:
-        await asyncio.sleep_ms(100) # Allow cancellations
-    except asyncio.CancelledError: pass
-    print_verbose("[DEBUG] Background tasks cancelled.", 3)
-
-    await homing(vfd_master) # Perform homing, passing the vfd_master instance
-
-    # Restart background tasks
-    print_verbose("[DEBUG] Restarting background tasks after homing...", 3)
-    status_task = asyncio.create_task(vfd_status_request_task(vfd_master))
-    relay_task = asyncio.create_task(relay_control_task())
-    slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_handler)) # Pass the handler instance
+    # print_verbose("[DEBUG] Cancelling background tasks for homing...", 3)
+    # status_task.cancel()
+    # relay_task.cancel()
+    # slave_poll_task.cancel() # Also cancel slave polling during homing
+    # try:
+    #     await asyncio.sleep_ms(100) # Allow cancellations
+    # except asyncio.CancelledError: pass
+    # print_verbose("[DEBUG] Background tasks cancelled.", 3)
+    #
+    # await homing(vfd_master) # Perform homing, passing the vfd_master instance
+    #
+    # # Restart background tasks
+    # print_verbose("[DEBUG] Restarting background tasks after homing...", 3)
+    # status_task = asyncio.create_task(vfd_status_request_task(vfd_master))
+    # relay_task = asyncio.create_task(relay_control_task())
+    # slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_handler)) # Pass the handler instance
+    print_verbose("[INFO TEST] Homing Sequence Disabled.", 0)
     # --- End Homing Sequence ---
 
-    print_verbose("[INFO] Main loop started. System operational.", 0)
+    print_verbose("[INFO] Main loop started. System operational (Minimal Tasks for Step 1.1).", 0)
 
     # --- Main Execution Loop ---
     while True:
