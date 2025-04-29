@@ -1,275 +1,310 @@
-# main.py
+# main_pico/main.py - Refactored for Modularity & Modbus
 
 import time
 import sys
 import uasyncio as asyncio
 from machine import Pin, UART
-from motor_control import initialize_cfw500
-from encoder_module import initialize_encoder, encoder_callback
-from utils import print_verbose, show_manual, load_configuration, state, user_cmd_uart, DE_RE_UART1_PIN
-from commands import process_command
+from cfw500_modbus import CFW500Modbus # Import class directly
+from encoder_module import initialize_encoder
+from command_processor import process_modbus_commands # Import the new processor
+from utils import (
+    print_verbose, show_manual, load_configuration, save_configuration,
+    internal_state, slave_registers, update_input_registers,
+    REG_CMD, REG_TARGET_RPM, REG_VERBOSE, REG_ENC_MODE, REG_OFFSET_STEPS,
+    REG_FAULT_FLAG, REG_HOMING_FLAG
+)
+from umodbus.serial import Serial as ModbusRTUMaster # For VFD (if not using CFW500Modbus class directly)
+from umodbus.serial import ModbusRTUSlave # For Relay comms
 
-# Configuration for UART0 (Modbus RTU communication with VFD)
-UART0_ID = 0  # UART0 for Modbus RTU
-TX_PIN_NUM = 0  # GPIO0 (TX) for UART0
-RX_PIN_NUM = 1  # GPIO1 (RX) for UART0
-DE_RE_PIN = Pin(2, Pin.OUT)
-DE_RE_PIN.value(0)  # Initially enable receiver
-SLAVE_ADDRESS = 1  # Modbus slave address of the inverter
+# --- Constants ---
+# Network 1: Relay (Master) <-> Main (Slave) - UART1
+SLAVE_UART_ID = 1
+SLAVE_BAUDRATE = 115200 # Match Relay Pico
+SLAVE_TX_PIN_NUM = 4  # GPIO4
+SLAVE_RX_PIN_NUM = 5  # GPIO5
+SLAVE_DE_RE_PIN_NUM = 6 # GPIO6
+MAIN_PICO_SLAVE_ADDR = 1
 
-# LED Configuration
-LED_PIN = 25  # On-board LED pin on Raspberry Pi Pico
+# Network 2: Main (Master) <-> VFD (Slave) - UART0
+VFD_UART_ID = 0
+VFD_BAUDRATE = 19200 # Keep original VFD baudrate
+VFD_TX_PIN_NUM = 0  # GPIO0
+VFD_RX_PIN_NUM = 1  # GPIO1
+VFD_DE_RE_PIN_NUM = 2 # GPIO2
+VFD_SLAVE_ADDRESS = 1 # Original VFD slave address
+
+# Hardware Pins
+LED_PIN = 25
+ZERO_ENDSTOP_PIN_NUM = 18
+RELAY_PIN1_NUM = 20
+RELAY_PIN2_NUM = 21
+
+# Timing
+STATUS_REQUEST_INTERVAL_MS = 5000 # VFD status check interval
+RELAY_CONTROL_INTERVAL_MS = 1000 # Relay update interval
+MODBUS_SLAVE_POLL_INTERVAL_MS = 10 # How often to check for slave requests
+MAIN_LOOP_SLEEP_MS = 20 # Main loop sleep
+
+# --- Hardware Initialization ---
 led = Pin(LED_PIN, Pin.OUT)
 led.on() # Turn LED on permanently
 
-# Zero Endstop Detection on GPIO18
-zero_pin = Pin(18, Pin.IN, Pin.PULL_UP)
+zero_pin = Pin(ZERO_ENDSTOP_PIN_NUM, Pin.IN, Pin.PULL_UP)
+relay_pin1 = Pin(RELAY_PIN1_NUM, Pin.OUT, value=0)
+relay_pin2 = Pin(RELAY_PIN2_NUM, Pin.OUT, value=0)
 
-# Event for signaling endstop trigger from IRQ
+# --- Modbus Initialization ---
+# Network 1: Modbus Slave (for Relay Master)
+slave_de_re_pin = Pin(SLAVE_DE_RE_PIN_NUM, Pin.OUT)
+modbus_slave_for_relay = ModbusRTUSlave(
+    pins=(SLAVE_TX_PIN_NUM, SLAVE_RX_PIN_NUM),
+    baudrate=SLAVE_BAUDRATE,
+    ctrl_pin=SLAVE_DE_RE_PIN_NUM, # Use pin number directly
+    uart_id=SLAVE_UART_ID,
+    slave_addr=MAIN_PICO_SLAVE_ADDR,
+    register_map=slave_registers # Use the map defined in utils
+)
+print_verbose("[INFO] Modbus Slave (UART1 for Relay) initialized.", 2)
+
+# Network 2: Modbus Master (for VFD)
+vfd_de_re_pin = Pin(VFD_DE_RE_PIN_NUM, Pin.OUT) # DE/RE pin object for VFD master
+vfd_master = CFW500Modbus( # Instantiate the VFD control class
+    uart_id=VFD_UART_ID,
+    tx_pin=VFD_TX_PIN_NUM,
+    rx_pin=VFD_RX_PIN_NUM,
+    de_re_pin=VFD_DE_RE_PIN_NUM, # Pass pin number
+    slave_address=VFD_SLAVE_ADDRESS
+)
+print_verbose("[INFO] Modbus Master (UART0 for VFD) initialized.", 2)
+
+# --- Async Events ---
 endstop_event = asyncio.Event()
 
-# Initialize Relay Control Pins
-relay_pin1 = Pin(20, Pin.OUT)
-relay_pin2 = Pin(21, Pin.OUT)
-relay_pin1.value(0)
-relay_pin2.value(0)
+# --- Homing ---
+def endstop_triggered_callback_irq(pin):
+    # --- IRQ Handler --- Keep simple! ---
+    endstop_event.set()
+    # --- End IRQ Handler ---
 
-# Removed led_blink_task to reduce scheduler load
-
-# Zero Endstop Position Detection
-def zero_position_callback(pin):
-    """Callback function when the endstop (zero position) is detected."""
-    print_verbose("[INFO] Zero position detected.", 1)
-    # Do not reset the encoder position; only output a message
-
-async def homing(cfw500):
-    """Performs the homing routine to establish the zero position."""
-    # Clear the event before starting
+async def homing(cfw500_master_obj): # Pass the VFD master object
+    """Performs the homing routine."""
     endstop_event.clear()
     print_verbose("[INFO] Starting homing routine...", 0)
+    internal_state['homing_completed'] = False
+    update_input_registers(homing=False) # Update Modbus register
 
-    # Move motor towards the endstop
-    homing_speed_rpm = 1000 # Use 1000 RPM as confirmed
+    homing_speed_rpm = 1000 # Use a reasonable default
     try:
-        cfw500.start_motor(homing_speed_rpm)
+        cfw500_master_obj.start_motor(homing_speed_rpm)
         print_verbose(f"[ACTION] Motor started at {homing_speed_rpm} RPM for homing.", 0)
     except Exception as e:
-        print_verbose(f"[ERROR] Failed to start motor: {e}", 0)
-        return
+        print_verbose(f"[ERROR] Homing: Failed to start motor: {e}", 0)
+        return # Abort homing
 
-    # Wait until the endstop is triggered
-    # endstop_triggered = False # Replaced by event
+    # Attach IRQ
+    zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=endstop_triggered_callback_irq)
+    print_verbose("[DEBUG] Homing: Waiting for endstop event...", 3)
 
-    def endstop_triggered_callback(pin):
-        # --- IRQ Handler ---
-        # Keep this extremely simple: just set the event.
-        # Avoid prints, state updates, or Modbus calls here.
-        endstop_event.set()
-        # --- End IRQ Handler ---
+    try:
+        # Wait for the event with a timeout
+        await asyncio.wait_for_ms(endstop_event.wait(), 30000) # 30 second timeout
+        print_verbose("[DEBUG] Homing: Endstop event received.", 3)
 
-    # Attach the IRQ handler
-    zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=endstop_triggered_callback)
+        # Stop the motor repeatedly
+        stop_success = False
+        stop_duration_ms = 500
+        start_time = time.ticks_ms()
+        print_verbose(f"[DEBUG] Homing: Attempting motor stop for {stop_duration_ms}ms...", 3)
+        while time.ticks_diff(time.ticks_ms(), start_time) < stop_duration_ms:
+            try:
+                cfw500_master_obj.stop_motor()
+                stop_success = True
+            except Exception as e:
+                print_verbose(f"[ERROR] Homing: Failed to send stop command: {e}", 0)
+                stop_success = False
+                break # Exit loop on error
+            await asyncio.sleep_ms(50) # Yield briefly
 
-    # Wait efficiently for the IRQ to signal via the event
-    print_verbose("[DEBUG] Waiting for endstop event...", 0)
-    await endstop_event.wait()
-    print_verbose("[DEBUG] Endstop event received.", 0)
+        if stop_success:
+            print_verbose("[ACTION] Homing: Motor stop command sent.", 0)
+            # Set zero offset based on raw encoder position at trigger
+            internal_state['encoder_zero_offset'] = internal_state['encoder_raw_position']
+            print_verbose(f"[DEBUG] Homing: Encoder zero offset set to {internal_state['encoder_zero_offset']}", 3)
+            internal_state['homing_completed'] = True
+            update_input_registers(homing=True) # Update Modbus register
+            print_verbose("[INFO] Homing complete.", 0)
+        else:
+            print_verbose("[WARNING] Homing: Failed to send stop command after endstop.", 0)
+            internal_state['homing_completed'] = False # Mark as not completed
+            update_input_registers(homing=False)
 
-    # Stop the motor (This happens *after* the event is set and wait() returns)
-    # Loop sending stop command for a short duration to ensure it gets through
-    stop_success = False
-    stop_duration = 0.5  # seconds
-    start_time = time.ticks_ms()
-    print_verbose(f"[DEBUG] Attempting to stop motor for {stop_duration}s...", 0)
-    while time.ticks_diff(time.ticks_ms(), start_time) < int(stop_duration * 1000):
+    except asyncio.TimeoutError:
+        print_verbose("[ERROR] Homing: Timed out waiting for endstop.", 0)
+        # Ensure motor is stopped if timeout occurs
         try:
-            cfw500.stop_motor()
-            stop_success = True # Mark success if command sent at least once
-            # Don't print repeatedly in loop, print status after
+            cfw500_master_obj.stop_motor()
+            print_verbose("[ACTION] Homing Timeout: Motor stop command sent.", 0)
         except Exception as e:
-            print_verbose(f"[ERROR] Failed to send stop motor command during loop: {e}", 0)
-            stop_success = False
-            break # Exit loop if error occurs
-        await asyncio.sleep(0.05) # Yield briefly within the stop loop
+            print_verbose(f"[ERROR] Homing Timeout: Failed to send stop command: {e}", 0)
+        internal_state['homing_completed'] = False
+        update_input_registers(homing=False)
 
-    if stop_success:
-        print_verbose("[ACTION] Motor stop command sent repeatedly after endstop event.", 0)
-    else:
-        print_verbose("[WARNING] Homing failed to send stop command.", 0)
-        # Decide if we should exit homing or try to continue without offset update
-        # return # Exit homing if stop fails - maybe allow continuing?
+    finally:
+        # Detach IRQ regardless of outcome
+        zero_pin.irq(handler=None)
+        print_verbose("[DEBUG] Homing: Endstop IRQ detached.", 3)
 
-    # Detach the IRQ handler *after* attempting to stop
-    zero_pin.irq(handler=None)
-    print_verbose("[DEBUG] Endstop IRQ detached.", 0)
 
-    # Update zero offset *after* stopping and detaching IRQ
-    state['encoder_zero_offset'] = state['encoder_position'] # Assign directly, don't accumulate
-    print_verbose(f"[DEBUG] Encoder zero offset set to: {state['encoder_zero_offset']}", 0)
-
-    # Phase 2 (moving to offset) removed as per user request.
-    # Homing now simply finds the endstop, stops, and sets the zero offset.
-
-    print_verbose("[INFO] Homing complete (Phase 1 only).", 0)
-
-    # Set homing_completed to True
-    state['homing_completed'] = True
-    print_verbose("[DEBUG] Homing completed. Encoder offset will now be applied.", 0)
-
-    # Re-setup the endstop to only output a message when triggered, but not reset position
-    zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=zero_position_callback)
-
-async def read_user_input(cfw500):
-    rx_buffer = b''
+# --- Background Tasks ---
+async def vfd_status_request_task(cfw500_master_obj): # Pass VFD master object
+    """Periodically reads VFD status and updates internal state and Modbus registers."""
     while True:
-        if user_cmd_uart.any():
-            DE_RE_UART1_PIN.value(0)  # Ensure receiver is enabled
-            data = user_cmd_uart.read()
-            if data:
-                rx_buffer += data
-                while b'\n' in rx_buffer:
-                    line, rx_buffer = rx_buffer.split(b'\n', 1)
-                    try:
-                        user_input = line.decode('utf-8').strip()
-                        if user_input:
-                            print(f"[DEBUG] Received command: {user_input}")
-                            should_continue = await process_command(user_input, cfw500)
-                            if not should_continue:
-                                return
-                    except Exception as e:
-                        print_verbose(f"[ERROR] Exception during decoding: {e}", 2)
-        await asyncio.sleep(0.02) # Check for commands more frequently
+        try:
+            fault = cfw500_master_obj.check_fault()
+            status_p0680 = cfw500_master_obj.read_p0680()
+            current_rpm = cfw500_master_obj.read_current_speed()
 
-async def status_request_task(cfw500):
-    STATUS_REQUEST_INTERVAL = 5  # Interval in seconds
-    while True:
-        fault = cfw500.check_fault()
-        state['fault_detected'] = fault  # Update the fault status in the shared state
-        if state['VERBOSE_LEVEL'] >= 2:
-            if fault:
-                print_verbose("[ALERT] The inverter is in FAULT.", 2)
+            if fault is not None:
+                internal_state['fault_detected'] = fault
+                update_input_registers(fault=fault)
+                if fault and internal_state['VERBOSE_LEVEL'] >= 1:
+                     print_verbose("[ALERT] VFD Fault Detected!", 1)
             else:
-                print_verbose("[INFO] The inverter is NOT in fault.", 2)
-        await asyncio.sleep(STATUS_REQUEST_INTERVAL)
+                 print_verbose("[WARNING] Failed to read VFD fault status.", 1)
+
+            if status_p0680 is not None:
+                 update_input_registers(vfd_status=status_p0680)
+                 if internal_state['VERBOSE_LEVEL'] >= 3:
+                      print_verbose(f"[DEBUG] VFD Status P0680: 0x{status_p0680:04X}", 3)
+            else:
+                 print_verbose("[WARNING] Failed to read VFD status P0680.", 1)
+
+            if current_rpm is not None:
+                 update_input_registers(rpm=current_rpm)
+                 if internal_state['VERBOSE_LEVEL'] >= 2:
+                      print_verbose(f"[INFO] VFD Speed: {current_rpm:.1f} RPM", 2)
+            else:
+                 print_verbose("[WARNING] Failed to read VFD current speed.", 1)
+
+        except Exception as e:
+            print_verbose(f"[ERROR] VFD Status Task Error: {e}", 0)
+
+        await asyncio.sleep_ms(STATUS_REQUEST_INTERVAL_MS)
 
 async def relay_control_task():
+    """Controls relays based on internal fault state."""
     while True:
-        if state['fault_detected']:
-            # Blink the relay-controlled LEDs
-            relay_pin1.value(1)
-            relay_pin2.value(1)
-            await asyncio.sleep(0.5)
-            relay_pin1.value(0)
-            relay_pin2.value(0)
-            await asyncio.sleep(0.5)
+        if internal_state['fault_detected']:
+            # Blink on fault
+            relay_pin1.on()
+            relay_pin2.on()
+            await asyncio.sleep_ms(500)
+            relay_pin1.off()
+            relay_pin2.off()
+            await asyncio.sleep_ms(500)
         else:
-            # No fault, keep the relay-controlled LEDs on
-            relay_pin1.value(1)
-            relay_pin2.value(1)
-            await asyncio.sleep(1)  # Check the fault status every second
+            # Solid on if no fault
+            relay_pin1.on()
+            relay_pin2.on()
+            await asyncio.sleep_ms(RELAY_CONTROL_INTERVAL_MS) # Check state less frequently if ok
 
-async def await_serial_and_show_manual():
-    """Waits for serial communication to be established, then shows the manual."""
-    # Wait for serial communication to be established
-    print("[DEBUG] Waiting for serial communication to be established...")
-    await asyncio.sleep(1)
-    # Display the instruction manual
+async def modbus_slave_poll_task(modbus_slave_obj): # Pass slave object
+    """ Periodically processes incoming Modbus slave requests. """
+    while True:
+        try:
+            # process() checks for incoming requests and handles them based on register_map
+            result = modbus_slave_obj.process()
+            # No need to log successful processing unless debugging slave issues
+            # if result and internal_state['VERBOSE_LEVEL'] >= 3:
+            #      print_verbose(f"[DEBUG] Modbus Slave processed: {result}", 3)
+        except Exception as e:
+            print_verbose(f"[ERROR] Modbus Slave processing error: {e}", 0)
+            # Consider if specific error handling/recovery is needed here
+
+        # Sleep briefly to yield control and define polling rate
+        await asyncio.sleep_ms(MODBUS_SLAVE_POLL_INTERVAL_MS)
+
+# --- Main Application Logic ---
+async def main():
+    # Show manual locally
     show_manual()
 
-async def main():
-    # Initialize cfw500
-    cfw500 = initialize_cfw500(UART0_ID, TX_PIN_NUM, RX_PIN_NUM, DE_RE_PIN, SLAVE_ADDRESS)
+    # Load configuration (loads into internal_state and updates slave_registers)
+    load_configuration()
+    # Ensure homing flag is initially false in register
+    update_input_registers(homing=False)
 
-    # Start the task to wait for serial communication and show the manual FIRST
-    asyncio.create_task(await_serial_and_show_manual())
-    await asyncio.sleep(0.1) # Give the manual task a chance to start printing
+    # Initialize Encoder (uses internal_state, updates slave_registers via callback)
+    initialize_encoder(16, 17) # Pins for encoder A, B
 
     # --- Safety Stop ---
-    # Ensure motor is stopped at the beginning before any operation
     try:
-        print_verbose("[SAFETY] Ensuring motor is stopped on startup...", 2)
-        cfw500.stop_motor()
-        print_verbose("[SAFETY] Motor stop command sent. Waiting 5s for deceleration...", 2)
-        await asyncio.sleep(5.0) # Wait 5 seconds for VFD deceleration ramp
-        print_verbose("[SAFETY] Initial 5s delay complete.", 2)
+        print_verbose("[SAFETY] Ensuring VFD motor is stopped on startup...", 0)
+        vfd_master.stop_motor() # Use the global vfd_master instance
+        print_verbose("[SAFETY] Motor stop command sent. Waiting 5s...", 0)
+        await asyncio.sleep(5.0)
+        print_verbose("[SAFETY] Initial delay complete.", 1)
     except Exception as e:
-        print_verbose(f"[ERROR] Failed to send initial stop command or wait: {e}", 2)
+        print_verbose(f"[ERROR] Failed initial VFD stop: {e}", 0)
     # --- End Safety Stop ---
 
-    # Read the maximum RPM from the inverter
-    max_rpm = cfw500.read_max_rpm()
-    if max_rpm is not None and state['VERBOSE_LEVEL'] >= 2:
-        print_verbose(f"[INFO] Maximum RPM Read: {max_rpm} RPM", 2)
-    elif max_rpm is None and state['VERBOSE_LEVEL'] >= 2:
-        print_verbose("[ERROR] Failed to read maximum RPM.", 2)
-
-    # Read the serial interface status
-    serial_state = cfw500.read_p0316()
-    if state['VERBOSE_LEVEL'] >= 2:
-        if serial_state == 0:
-            print_verbose("[SERIAL] Serial Interface Inactive", 2)
-        elif serial_state == 1:
-            print_verbose("[SERIAL] Serial Interface Active", 2)
-        elif serial_state == 2:
-            print_verbose("[SERIAL] Watchdog Error on Serial Interface", 2)
+    # Read initial VFD parameters if needed (e.g., max RPM)
+    try:
+        max_rpm = vfd_master.read_max_rpm()
+        if max_rpm:
+            print_verbose(f"[INFO] VFD Max RPM: {max_rpm}", 1)
         else:
-            print_verbose(f"[SERIAL] Unknown State ({serial_state})", 2)
+            print_verbose("[WARNING] Failed to read VFD Max RPM.", 1)
+    except Exception as e:
+        print_verbose(f"[ERROR] Failed reading VFD Max RPM: {e}", 0)
 
-    # Check for faults
-    fault = cfw500.check_fault()
-    state['fault_detected'] = fault  # Initialize the fault status
-    if state['VERBOSE_LEVEL'] >= 2:
-        if fault:
-            print_verbose("[ALERT] The inverter is in FAULT.", 2)
-        else:
-            print_verbose("[INFO] The inverter is NOT in fault.", 2)
 
-    # Initialize the Encoder
-    initialize_encoder(16, 17, lambda v, d: encoder_callback(v, d, state))
-
-    # Zero Endstop Detection (IRQ handler defined in homing)
-    # zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=zero_position_callback) # Initial setup moved to homing
-
-    # Load configuration
-    load_configuration()
-
-    # --- Temporarily disable background tasks for homing ---
-    print_verbose("[DEBUG] Starting background tasks initially...", 3)
-    status_task = asyncio.create_task(status_request_task(cfw500))
+    # --- Homing Sequence ---
+    # Start background tasks first
+    status_task = asyncio.create_task(vfd_status_request_task(vfd_master))
     relay_task = asyncio.create_task(relay_control_task())
-    await asyncio.sleep(0.1) # Allow tasks to start
+    slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_for_relay))
+    await asyncio.sleep_ms(100) # Let tasks start
 
-    print_verbose("[DEBUG] Cancelling background tasks before homing...", 3)
+    # Temporarily cancel background tasks during homing
+    print_verbose("[DEBUG] Cancelling background tasks for homing...", 3)
     status_task.cancel()
     relay_task.cancel()
-    try: # Allow cancellations to process
-        await asyncio.sleep(0.1)
-    except asyncio.CancelledError:
-        pass
+    slave_poll_task.cancel() # Also cancel slave polling during homing
+    try:
+        await asyncio.sleep_ms(100) # Allow cancellations
+    except asyncio.CancelledError: pass
     print_verbose("[DEBUG] Background tasks cancelled.", 3)
-    # --- End temporary disable ---
 
-    # Perform homing routine
-    await homing(cfw500)
+    await homing(vfd_master) # Perform homing, passing the vfd_master instance
 
-    # --- Restart background tasks after homing ---
+    # Restart background tasks
     print_verbose("[DEBUG] Restarting background tasks after homing...", 3)
-    status_task = asyncio.create_task(status_request_task(cfw500))
+    status_task = asyncio.create_task(vfd_status_request_task(vfd_master))
     relay_task = asyncio.create_task(relay_control_task())
-    # --- End restart ---
+    slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_for_relay))
+    # --- End Homing Sequence ---
 
-    # Start main command reading task
-    asyncio.create_task(read_user_input(cfw500))
+    print_verbose("[INFO] Main loop started. System operational.", 0)
 
-    # Keep the main loop running (tasks run in background)
-    print_verbose("[INFO] Main loop started. System operational.", 2)
+    # --- Main Execution Loop ---
     while True:
-        await asyncio.sleep(1)
+        # Process commands written via Modbus by the Relay Master
+        await process_modbus_commands(vfd_master) # Pass the vfd_master instance
 
+        # Main loop sleep
+        await asyncio.sleep_ms(MAIN_LOOP_SLEEP_MS)
+
+# --- Run ---
 try:
     asyncio.run(main())
 except KeyboardInterrupt:
-    if state['VERBOSE_LEVEL'] >= 2:
-        print_verbose("\n[INFO] Program interrupted by user.", 2)
+    print_verbose("\n[INFO] Main Pico program interrupted by user.", 0)
 finally:
-    asyncio.new_event_loop()
+    # Optional cleanup (e.g., ensure motor is stopped)
+    try:
+         vfd_master.stop_motor()
+         print_verbose("[SAFETY] Motor stop attempted on exit.", 0)
+    except Exception as e:
+         print_verbose(f"[ERROR] Failed to stop motor on exit: {e}", 0)
+    asyncio.new_event_loop() # Reset uasyncio state
