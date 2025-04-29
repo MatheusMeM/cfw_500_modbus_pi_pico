@@ -41,8 +41,7 @@ modbus_master = ModbusRTUMaster(
     baudrate=RS485_BAUDRATE,
     # Default bits=8, parity=None, stop=1 should be suitable
     ctrl_pin=RS485_DE_RE_PIN_NUM,
-    uart_id=RS485_UART_ID,
-    timeout=500 # Explicitly set timeout to 500ms
+    uart_id=RS485_UART_ID # Removed invalid timeout argument
 )
 
 print("[INFO] Relay Pico initialized as Modbus Master. Waiting for communication...")
