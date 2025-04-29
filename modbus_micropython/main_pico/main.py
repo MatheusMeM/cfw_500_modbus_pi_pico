@@ -93,16 +93,42 @@ def handle_command_register_write(reg_type, address, val):
     # global vfd_master # vfd_master is now defined globally before this function
 
     # The library might pass a list even for single register writes
-    command_to_process = val[0] if isinstance(val, list) else val
+    # If multiple registers are written (e.g., CMD and RPM), val might be a list
+    print_verbose(f"[DEBUG CB] Callback received: reg_type={reg_type}, address={address}, val={val}", 3)
+    command_to_process = 0
+    target_rpm_val = 0 # Default RPM
+
+    if isinstance(val, list):
+        command_to_process = val[0] # First value is the command
+        if len(val) > 1:
+            # ASSUMPTION: If val is a list > 1 element, the second element is the RPM
+            # This depends on the Relay Pico writing CMD and RPM together using
+            # function code 16 (Write Multiple Registers).
+            target_rpm_val = val[1]
+            print_verbose(f"[DEBUG CB] Extracted RPM from multi-register write: {target_rpm_val}", 3)
+        else:
+            # Only command was written, try reading RPM from our dictionary (might be stale)
+            try:
+                target_rpm_val = slave_registers['HREGS']['target_rpm']['val']
+                print_verbose(f"[DEBUG CB] Read RPM from dictionary (single write): {target_rpm_val}", 3)
+            except Exception as e:
+                print_verbose(f"[ERROR CB] Failed to read target RPM from dict: {e}", 0)
+                target_rpm_val = 0
+    else:
+        # Single value write (likely just the command)
+        command_to_process = val
+        # Try reading RPM from our dictionary (might be stale)
+        try:
+            target_rpm_val = slave_registers['HREGS']['target_rpm']['val']
+            print_verbose(f"[DEBUG CB] Read RPM from dictionary (single write): {target_rpm_val}", 3)
+        except Exception as e:
+            print_verbose(f"[ERROR CB] Failed to read target RPM from dict: {e}", 0)
+            target_rpm_val = 0
+
     print_verbose(f"[DEBUG CB] Command Register Write Detected: Value={command_to_process}", 3)
 
     if command_to_process != 0:
-        # Read associated target RPM *at the time of the command write*
-        try:
-            target_rpm_val = slave_registers['HREGS']['target_rpm']['val']
-        except Exception as e:
-            print_verbose(f"[ERROR CB] Failed to read target RPM: {e}", 0)
-            target_rpm_val = 0 # Default to 0 on error
+        # RPM value determined above
 
         print_verbose(f"[DEBUG CB] Processing Command: {command_to_process}, RPM: {target_rpm_val}", 3)
 
