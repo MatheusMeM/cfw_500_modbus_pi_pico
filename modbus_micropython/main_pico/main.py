@@ -180,32 +180,32 @@ uart_data_event = asyncio.Event() # Event for UART RX data
 
 # --- UART RX IRQ Handler ---
 def uart_rx_irq_handler(uart_obj):
-   """IRQ handler for UART RX. Signals the event task."""
-   # Keep this extremely simple - just set the event
-   global uart_data_event
-   uart_data_event.set()
+    """IRQ handler for UART RX. Signals the event task."""
+    # Keep this extremely simple - just set the event
+    global uart_data_event
+    uart_data_event.set()
 
-# --- Initialize Slave UART for IRQ ---
-# We need a separate UART object instance to attach the IRQ handler reliably,
-# even though the Modbus library manages its own UART interaction internally via slave_serial_itf.
-try:
-   slave_uart_for_irq = UART(
-       id=SLAVE_UART_ID,
-       baudrate=SLAVE_BAUDRATE,
-       bits=8,
-       parity=None,
-       stop=1,
-       tx=SLAVE_TX_PIN_NUM, # Need TX pin defined even if only using RX IRQ
-       rx=SLAVE_RX_PIN_NUM,
-       timeout=10, # Short timeout, not critical for IRQ mode
-       timeout_char=2
-   )
-   # Register the IRQ handler
-   slave_uart_for_irq.irq(trigger=UART.RX_ANY, handler=uart_rx_irq_handler)
-   print_verbose("[INFO] Slave UART RX IRQ handler registered.", 2)
-except Exception as e:
-   print_verbose(f"[ERROR] Failed to initialize Slave UART for IRQ: {e}", 0)
-   slave_uart_for_irq = None # Ensure it's None if init fails
+    # --- Initialize Slave UART for IRQ ---
+    # We need a separate UART object instance to attach the IRQ handler reliably,
+    # even though the Modbus library manages its own UART interaction internally via slave_serial_itf.
+    try:
+        slave_uart_for_irq = UART(
+            id=SLAVE_UART_ID,
+            baudrate=SLAVE_BAUDRATE,
+            bits=8,
+            parity=None,
+            stop=1,
+            tx=SLAVE_TX_PIN_NUM, # Need TX pin defined even if only using RX IRQ
+            rx=SLAVE_RX_PIN_NUM,
+            timeout=10, # Short timeout, not critical for IRQ mode
+            timeout_char=2
+        )
+        # Register the IRQ handler
+        slave_uart_for_irq.irq(trigger=UART.RX_ANY, handler=uart_rx_irq_handler)
+        print_verbose("[INFO] Slave UART RX IRQ handler registered.", 2)
+    except Exception as e:
+        print_verbose(f"[ERROR] Failed to initialize Slave UART for IRQ: {e}", 0)
+        slave_uart_for_irq = None # Ensure it's None if init fails
 
 # --- Homing ---
 def endstop_triggered_callback_irq(pin):
