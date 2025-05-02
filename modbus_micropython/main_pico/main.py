@@ -175,9 +175,7 @@ def handle_command_register_write(reg_type, address, val):
 
 # 3. Setup the registers using the map from utils (NOW includes the callback)
 modbus_slave_handler.setup_registers(registers=slave_registers)
-print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized and registers set up.", 2)
-
-
+print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized and registers set up.", 3)
 
 
 # --- UART RX IRQ Handler ---
