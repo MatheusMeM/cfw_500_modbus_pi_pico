@@ -165,18 +165,18 @@ def handle_command_register_write(reg_type, address, val):
         slave_registers['HREGS']['command']['val'] = 0
         internal_state['last_written_cmd'] = 0
 
-# --- Assign Callbacks BEFORE Setup ---
-slave_registers['HREGS']['command']['on_set_cb'] = handle_command_register_write
-print_verbose("[INFO] Command register callback assigned to slave_registers dict.", 2)
+        # --- Assign Callbacks BEFORE Setup ---
+        slave_registers['HREGS']['command']['on_set_cb'] = handle_command_register_write
+        print_verbose("[INFO] Command register callback assigned to slave_registers dict.", 2)
 
-# 3. Setup the registers using the map from utils (NOW includes the callback)
-modbus_slave_handler.setup_registers(registers=slave_registers)
-print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized and registers set up.", 2)
+        # 3. Setup the registers using the map from utils (NOW includes the callback)
+        modbus_slave_handler.setup_registers(registers=slave_registers)
+        print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized and registers set up.", 2)
 
 
-# --- Async Events ---
-endstop_event = asyncio.Event()
-uart_data_event = asyncio.Event() # Event for UART RX data
+        # --- Async Events ---
+        endstop_event = asyncio.Event()
+        uart_data_event = asyncio.Event() # Event for UART RX data
 
 # --- UART RX IRQ Handler ---
 def uart_rx_irq_handler(uart_obj):
