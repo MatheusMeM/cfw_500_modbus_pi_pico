@@ -25,7 +25,7 @@ async def process_modbus_commands(vfd_master): # vfd_master might not be needed 
         # target_rpm_val = slave_registers['HREGS']['target_rpm']['val'] # Action commands handled by callback
         verbose_reg_val = slave_registers['HREGS']['verbosity_level']['val']
         enc_mode_reg_val = slave_registers['HREGS']['encoder_mode']['val']
-        print_verbose(f"[DEBUG SETTINGS] Read HREGS: Verbose={verbose_reg_val}, EncMode={enc_mode_reg_val}", 3)
+        # Removed frequent print: print_verbose(f"[DEBUG SETTINGS] Read HREGS: Verbose={verbose_reg_val}, EncMode={enc_mode_reg_val}", 3)
     except KeyError as e:
         print_verbose(f"[ERROR SETTINGS] Missing key in slave_registers: {e}", 0)
         return # Exit if we can't read registers
