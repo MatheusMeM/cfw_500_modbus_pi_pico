@@ -30,7 +30,7 @@ slave_registers = {
     'HREGS': { # Holding Registers (Writeable by Relay Master)
         'command':          {'register': REG_CMD,          'val': 0}, # on_set_cb will be assigned in main.py before setup
         'target_rpm':       {'register': REG_TARGET_RPM,   'val': 0},
-        'verbosity_level':  {'register': REG_VERBOSE,      'val': 1}, # Default verbosity
+        'verbosity_level':  {'register': REG_VERBOSE,      'val': 3}, # Default verbosity
         'encoder_mode':     {'register': REG_ENC_MODE,     'val': 1}, # Default 'deg'
     },
     'IREGS': { # Input Registers (Readable by Relay Master)
@@ -50,7 +50,7 @@ slave_registers = {
 # Global Variables for shared internal state (distinct from Modbus registers)
 # Some state might now be directly read/written via Modbus registers
 internal_state = {
-    'VERBOSE_LEVEL': 1, # Still needed for local print control
+    'VERBOSE_LEVEL': 3, # Still needed for local print control
     'encoder_raw_position': 0, # Raw steps from encoder driver before offsets
     'encoder_offset_steps': 0, # Calibration offset
     'encoder_output_mode': "deg", # Internal tracking ('step' or 'deg')
@@ -67,6 +67,7 @@ CRITICAL_PREFIXES = ("[SAFETY]", "[WARNING]", "[ALERT]", "[ERROR]")
 def print_verbose(message, level, override=False):
     """Prints messages locally according to the verbosity level."""
     is_critical = any(message.startswith(prefix) for prefix in CRITICAL_PREFIXES)
+    
     # Use internal_state for local verbosity control
     current_level = internal_state['VERBOSE_LEVEL']
 
@@ -76,7 +77,6 @@ def print_verbose(message, level, override=False):
     if should_print:
         # Only print to local console (USB)
         print(message)
-        # Removed UART1 sending logic
 
 def show_manual():
     """Displays the instruction manual locally."""
