@@ -50,7 +50,7 @@ slave_registers = {
 # Global Variables for shared internal state (distinct from Modbus registers)
 # Some state might now be directly read/written via Modbus registers
 internal_state = {
-    'VERBOSE_LEVEL': 1, # Still needed for local print control
+    'VERBOSE_LEVEL': 3, # Still needed for local print control
     'encoder_raw_position': 0, # Raw steps from encoder driver before offsets
     'encoder_offset_steps': 0, # Calibration offset
     'encoder_output_mode': "deg", # Internal tracking ('step' or 'deg')
