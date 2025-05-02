@@ -2,7 +2,7 @@
 
 This document outlines the current issues, planned improvements, and tasks for the Raspberry Pi Pico VFD Motor Control project using Modbus RTU. Each item is categorized by status and includes detailed implementation notes.
 
-## 🚨 Critical Issues (Modbus Communication Reliability)
+## 🚨 Critical Issues (Modbus Communication Reliability) A
 #
 ### 1. Relay-Main Modbus Read Failure
 **Status**: 🔴 TO DO
