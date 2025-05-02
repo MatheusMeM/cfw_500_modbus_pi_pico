@@ -7,19 +7,19 @@ This project implements a system for controlling a Variable Frequency Drive (VFD
 ## System Architecture
 
 ```
-+------+   USB Serial   +-----------------+   Modbus RTU (RS485, 115200 baud)   +----------------+   Modbus RTU (RS485, 19200 baud)      +---------+       +-------+
++------+   USB Serial   +-----------------+   Modbus RTU (RS485, 19200 baud)    +----------------+   Modbus RTU (RS485, 19200 baud)      +---------+       +-------+
 |  PC  | <------------> | Relay Pico      | <---------------------------------> | Main Pico      | <-----------------------------------> | CFW500  | ----> | Motor |
-|      |                | (Modbus Master) |        (Network 1)                | (Modbus Slave) |        (Network 2 - VFD Master)     | (Slave) |       +-------+
-+------+                +-----------------+                                   +----------------+                                       +---------+
-                                                                                      |
-                                                                                      | Encoder Signals (A, B)
-                                                                                      v
-                                                                                +-----------+
-                                                                                |  Encoder  |
-                                                                                +-----------+
-                                                                                      | Z Signal (Endstop)
-                                                                                      v
-                                                                                   GPIO Pin
+|      |                | (Modbus Master) |          (Network 1)                | (Modbus Slave) |        (Network 2 - VFD Master)       | (Slave) |       +-------+
++------+                +-----------------+                                     +----------------+                                       +---------+
+                                                                                        |
+                                                                                        | Encoder Signals (A, B)
+                                                                                        v
+                                                                                  +-----------+
+                                                                                  |  Encoder  |
+                                                                                  +-----------+
+                                                                                        | Z Signal (Endstop)
+                                                                                        v
+                                                                                     GPIO Pin
 ```
 
 **Network 1 (Relay <-> Main):**
