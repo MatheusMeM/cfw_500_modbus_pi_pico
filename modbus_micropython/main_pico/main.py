@@ -80,6 +80,9 @@ vfd_master = CFW500Modbus( # Instantiate the VFD control class
 )
 print_verbose("[INFO] Modbus Master (UART0 for VFD) initialized.", 2)
 
+# --- Async Events ---
+endstop_event = asyncio.Event()
+uart_data_event = asyncio.Event() # Event for UART RX data
 
 # --- Modbus Register Callbacks ---
 # Define the callback function BEFORE it's assigned
@@ -174,9 +177,7 @@ def handle_command_register_write(reg_type, address, val):
         print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized and registers set up.", 2)
 
 
-        # --- Async Events ---
-        endstop_event = asyncio.Event()
-        uart_data_event = asyncio.Event() # Event for UART RX data
+
 
 # --- UART RX IRQ Handler ---
 def uart_rx_irq_handler(uart_obj):
