@@ -2,7 +2,8 @@
 
 import sys
 import time
-import uselect
+import asyncio # Added for async operations
+import select  # Added for reliable stdin check
 from machine import UART, Pin
 from umodbus.serial import Serial as ModbusRTUMaster # Assuming library is in lib folder or installed
 
@@ -29,10 +30,72 @@ REG_ENC_POS_DEG = 3   # Encoder Position (Degrees x100)
 REG_FAULT_FLAG = 4    # Fault Detected Flag (0/1)
 REG_HOMING_FLAG = 5   # Homing Completed Flag (0/1)
 REG_OFFSET_STEPS = 6  # Calibrated Offset (Steps)
+REG_MAX_RPM = 7       # Max RPM from VFD (P0208) - Added missing register definition
+
+# --- Modbus Statistics Tracking (Optional but Recommended) ---
+class ModbusStatistics:
+   """Track Modbus communication statistics"""
+   def __init__(self):
+       self.reset()
+
+   def reset(self):
+       """Reset all statistics"""
+       self.total_tx = 0
+       self.total_rx = 0
+       self.tx_errors = 0
+       self.rx_errors = 0
+       self.crc_errors = 0
+       self.timeouts = 0
+       self.retries = 0
+       self.avg_response_time_ms = 0.0
+       self.max_response_time_ms = 0
+       self._response_time_sum = 0
+
+   def record_tx(self, success=True):
+       self.total_tx += 1
+       if not success: self.tx_errors += 1
+
+   def record_rx(self, success=True, crc_error=False, response_time_ms=None):
+       if success:
+           self.total_rx += 1
+           if response_time_ms is not None:
+               self._response_time_sum += response_time_ms
+               self.avg_response_time_ms = self._response_time_sum / self.total_rx
+               if response_time_ms > self.max_response_time_ms:
+                   self.max_response_time_ms = response_time_ms
+       else:
+           self.rx_errors += 1
+           if crc_error: self.crc_errors += 1
+
+   def record_timeout(self):
+       self.timeouts += 1
+
+   def record_retry(self):
+       self.retries += 1
+
+   def get_success_rate(self):
+       if self.total_tx == 0: return 100.0
+       return (self.total_rx / self.total_tx) * 100
+
+   def get_stats_dict(self):
+       return {
+           "tx": self.total_tx, "rx": self.total_rx, "tx_errors": self.tx_errors,
+           "rx_errors": self.rx_errors, "crc_errors": self.crc_errors, "timeouts": self.timeouts,
+           "retries": self.retries, "avg_response_ms": self.avg_response_time_ms,
+           "max_response_ms": self.max_response_time_ms, "success_rate": self.get_success_rate()
+       }
+
+   def __str__(self):
+       return (f"Modbus Stats: TX={self.total_tx}, RX={self.total_rx}, "
+               f"Errors={self.tx_errors+self.rx_errors}(CRC:{self.crc_errors},TO:{self.timeouts}), "
+               f"Retries={self.retries}, Success={self.get_success_rate():.1f}%, "
+               f"AvgTime={self.avg_response_time_ms:.1f}ms, MaxTime={self.max_response_time_ms}ms")
+
+master_stats = ModbusStatistics()
 
 # --- Hardware Initialization ---
-rs485_de_re_pin = Pin(RS485_DE_RE_PIN_NUM, Pin.OUT)
-rs485_de_re_pin.value(0) # Start in receive mode
+# rs485_de_re_pin = Pin(RS485_DE_RE_PIN_NUM, Pin.OUT) # Removed: Let library handle DE/RE via ctrl_pin
+# rs485_de_re_pin.value(0) # Start in receive mode
 
 # Initialize UART for Modbus Master
 # Note: umodbus library handles UART initialization details if passed pins
@@ -46,21 +109,75 @@ modbus_master = ModbusRTUMaster(
 
 print("[INFO] Relay Pico initialized as Modbus Master. Waiting for communication...")
 
-# --- Polling Setup ---
-poller = uselect.poll()
-poller.register(sys.stdin, uselect.POLLIN) # Poll USB input
+# --- Async Read Helper ---
+async def read_registers_with_retry(modbus_func, slave_addr, starting_addr, register_qty, max_retries=3):
+   """Async Modbus read with exponential back-off and statistics"""
+   retry = 0
+   delay_ms = 50 # Initial delay
+   last_exception = None
 
-# --- Main Loop ---
-def run_master():
+   while retry < max_retries:
+       start_time = time.ticks_ms()
+       try:
+           master_stats.record_tx() # Record TX attempt
+           # The library handles DE/RE timing via ctrl_pin, no manual sleep needed here
+           result = modbus_func( # Call the actual read function (e.g., modbus_master.read_input_registers)
+               slave_addr=slave_addr,
+               starting_addr=starting_addr,
+               register_qty=register_qty
+           )
+           response_time = time.ticks_diff(time.ticks_ms(), start_time)
+           master_stats.record_rx(success=True, response_time_ms=response_time) # Record RX success
+           return result # Success
+       except Exception as e:
+           last_exception = e
+           response_time = time.ticks_diff(time.ticks_ms(), start_time)
+           # Basic error type checking
+           err_str = str(e).lower()
+           if "timeout" in err_str or "no data received" in err_str:
+                master_stats.record_timeout()
+                is_timeout = True
+           else:
+                is_timeout = False
+
+           if "crc" in err_str:
+                master_stats.record_rx(success=False, crc_error=True, response_time_ms=response_time)
+           elif not is_timeout: # Avoid double-counting timeouts as RX errors
+                master_stats.record_rx(success=False, response_time_ms=response_time)
+
+           print(f"[WARN] Modbus read failed (Attempt {retry+1}/{max_retries}): {e}")
+           retry += 1
+           if retry < max_retries:
+               master_stats.record_retry() # Record retry
+               print(f"[INFO] Retrying in {delay_ms}ms...")
+               await asyncio.sleep_ms(delay_ms) # Use async sleep
+               delay_ms = min(delay_ms * 2, 500) # Exponential back-off, capped
+           else:
+                print(f"[ERROR] Modbus read failed after {max_retries} attempts.")
+
+   # All retries failed
+   return None # Or raise last_exception
+
+# --- Stdin Check Helper ---
+def check_stdin_input():
+   """Non-blocking read from stdin using select"""
+   # Check if stdin has data waiting (0 timeout = non-blocking)
+   if select.select([sys.stdin], [], [], 0)[0]:
+       # Read the waiting line
+       line = sys.stdin.readline()
+       return line.strip() if line else None
+   return None
+
+# --- Main Async Loop ---
+async def run_master():
     last_status_read_time = time.ticks_ms()
     status_read_interval = 5000 # Read status from Main Pico every 5 seconds (ms) - Increased
 
     while True:
         # --- Check for commands from PC (USB) ---
-        if poller.poll(0): # Check stdin immediately, non-blocking
-            pc_command = sys.stdin.readline()
-            if pc_command:
-                pc_command = pc_command.strip()
+        pc_command = check_stdin_input() # Use non-blocking select-based check
+        if pc_command:
+            # pc_command = pc_command.strip() # Already stripped in check_stdin_input
                 print(f"[PC CMD RX] {pc_command}")
                 parts = pc_command.split()
                 if not parts:
@@ -72,48 +189,48 @@ def run_master():
                     if cmd == "start":
                         rpm = int(parts[1]) if len(parts) > 1 else 1000
                         print(f"[MODBUS TX] Writing START command and RPM={rpm}")
-                        time.sleep_ms(20) # Delay before write
+                        # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                         modbus_master.write_multiple_registers(MAIN_PICO_SLAVE_ADDR, REG_CMD, [1, rpm])
-                        time.sleep_ms(20) # Delay after write
+                        # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                     elif cmd == "stop":
                         print(f"[MODBUS TX] Writing STOP command")
-                        time.sleep_ms(20) # Delay before write
+                        # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                         modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_CMD, 2)
-                        time.sleep_ms(20) # Delay after write
+                        # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                     elif cmd == "reverse":
                         rpm = int(parts[1]) if len(parts) > 1 else 1000
                         print(f"[MODBUS TX] Writing REVERSE command and RPM={rpm}")
-                        time.sleep_ms(20) # Delay before write
+                        # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                         modbus_master.write_multiple_registers(MAIN_PICO_SLAVE_ADDR, REG_CMD, [3, rpm])
-                        time.sleep_ms(20) # Delay after write
+                        # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                     elif cmd == "set_speed":
                          if len(parts) > 1:
                             rpm = int(parts[1])
                             print(f"[MODBUS TX] Writing Target RPM={rpm}")
                             # Send command 0 (no action) but update RPM
-                            time.sleep_ms(20) # Delay before write
+                            # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                             modbus_master.write_multiple_registers(MAIN_PICO_SLAVE_ADDR, REG_CMD, [0, rpm])
-                            time.sleep_ms(20) # Delay after write
+                            # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                          else:
                              print("[ERROR] Specify RPM for set_speed")
                     elif cmd == "reset_fault":
                         print(f"[MODBUS TX] Writing RESET_FAULT command")
-                        time.sleep_ms(20) # Delay before write
+                        # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                         modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_CMD, 4)
-                        time.sleep_ms(20) # Delay after write
+                        # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                     elif cmd == "calibrate":
                         print(f"[MODBUS TX] Writing CALIBRATE command")
-                        time.sleep_ms(20) # Delay before write
+                        # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                         modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_CMD, 5)
-                        time.sleep_ms(20) # Delay after write
+                        # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                     elif cmd == "set_verbose":
                         if len(parts) > 1:
                             level = int(parts[1])
                             if 0 <= level <= 3:
                                 print(f"[MODBUS TX] Writing Verbosity Level={level}")
-                                time.sleep_ms(20) # Delay before write
+                                # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                                 modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_VERBOSE, level)
-                                time.sleep_ms(20) # Delay after write
+                                # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                             else:
                                 print("[ERROR] Verbosity level must be 0-3")
                         else:
@@ -124,9 +241,9 @@ def run_master():
                             mode_val = 0 if mode_str == "step" else 1 if mode_str == "deg" else -1
                             if mode_val != -1:
                                 print(f"[MODBUS TX] Writing Encoder Mode={mode_val} ({mode_str})")
-                                time.sleep_ms(20) # Delay before write
+                                # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                                 modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_ENC_MODE, mode_val)
-                                time.sleep_ms(20) # Delay after write
+                                # time.sleep_ms(20) # Removed: Let library handle DE/RE timing
                             else:
                                 print("[ERROR] Invalid encoder mode. Use 'step' or 'deg'")
                          else:
@@ -152,41 +269,50 @@ def run_master():
         if time.ticks_diff(current_time, last_status_read_time) >= status_read_interval:
             last_status_read_time = current_time
             try:
-                # Read multiple input registers in one go
+                # Read multiple input registers using the async retry helper
                 print("[MODBUS RX] Reading status registers from Main Pico...")
-                time.sleep_ms(20) # Delay before read
-                input_regs = modbus_master.read_input_registers(
+                input_regs = await read_registers_with_retry(
+                    modbus_master.read_input_registers, # Pass the function to call
                     slave_addr=MAIN_PICO_SLAVE_ADDR,
                     starting_addr=REG_CURRENT_RPM,
-                    register_qty=7 # Read all defined input registers
+                    register_qty=8 # CORRECTED: Read all 8 defined input registers
                 )
-                time.sleep_ms(20) # Delay after read attempt
+                # No manual sleep needed here, handled by retry logic and main loop sleep
 
-                if input_regs:
+                if input_regs and len(input_regs) == 8: # Check response validity
                     # Process and print received data to PC (USB)
-                    current_rpm = input_regs[REG_CURRENT_RPM - REG_CURRENT_RPM] / 10.0
-                    vfd_status = input_regs[REG_VFD_STATUS - REG_CURRENT_RPM]
-                    enc_steps = input_regs[REG_ENC_POS_STEPS - REG_CURRENT_RPM]
-                    # Handle potential signed value for steps if needed (assuming unsigned for now)
-                    enc_deg = input_regs[REG_ENC_POS_DEG - REG_CURRENT_RPM] / 100.0
-                    fault_flag = bool(input_regs[REG_FAULT_FLAG - REG_CURRENT_RPM])
-                    homing_flag = bool(input_regs[REG_HOMING_FLAG - REG_CURRENT_RPM])
-                    offset_steps = input_regs[REG_OFFSET_STEPS - REG_CURRENT_RPM]
+                    # Adjust indices based on starting address (REG_CURRENT_RPM = 0)
+                    current_rpm = input_regs[0] / 10.0
+                    vfd_status = input_regs[1]
+                    enc_steps = input_regs[2] # Consider signed conversion if needed
+                    enc_deg = input_regs[3] / 100.0
+                    fault_flag = bool(input_regs[4])
+                    homing_flag = bool(input_regs[5])
+                    offset_steps = input_regs[6] # Consider signed conversion if needed
+                    max_rpm = input_regs[7] # Added Max RPM read
 
-                    print(f"[STATUS RX] RPM: {current_rpm:.1f}, VFD: 0x{vfd_status:04X}, EncSteps: {enc_steps}, EncDeg: {enc_deg:.2f}, Fault: {fault_flag}, Homing: {homing_flag}, Offset: {offset_steps}")
+                    print(f"[STATUS RX] RPM: {current_rpm:.1f}, VFD: 0x{vfd_status:04X}, EncSteps: {enc_steps}, EncDeg: {enc_deg:.2f}, Fault: {fault_flag}, Homing: {homing_flag}, Offset: {offset_steps}, MaxRPM: {max_rpm}")
 
                 else:
-                    print("[ERROR] Modbus RX Error: No response from Main Pico status read.")
+                    # Error message already printed by read_registers_with_retry on failure
+                    print("[ERROR] Modbus RX Error: Failed to read status registers after retries or invalid response length.")
+                    # Optionally log stats on persistent failure
+                    print(f"[STATS] {master_stats}")
+
 
             except Exception as e:
-                print(f"[ERROR] Modbus RX Error: {e}")
+                # Catch potential errors in processing the response, not the read itself
+                print(f"[ERROR] Processing Main Pico status failed: {e}")
+                # Log stats on error
+                print(f"[STATS] {master_stats}")
 
-        time.sleep_ms(20) # Small delay to prevent tight loop hammering
+
+        await asyncio.sleep_ms(50) # Main loop sleep, adjust as needed
 
 # --- Run ---
 if __name__ == "__main__":
     try:
-        run_master()
+        asyncio.run(run_master())
     except KeyboardInterrupt:
         print("\n[INFO] Relay Pico program interrupted by user.")
     finally:
