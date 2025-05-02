@@ -172,9 +172,10 @@ def handle_command_register_write(reg_type, address, val):
         slave_registers['HREGS']['command']['on_set_cb'] = handle_command_register_write
         print_verbose("[INFO] Command register callback assigned to slave_registers dict.", 2)
 
-        # 3. Setup the registers using the map from utils (NOW includes the callback)
-        modbus_slave_handler.setup_registers(registers=slave_registers)
-        print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized and registers set up.", 2)
+
+# 3. Setup the registers using the map from utils (NOW includes the callback)
+modbus_slave_handler.setup_registers(registers=slave_registers)
+print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized and registers set up.", 2)
 
 
 
