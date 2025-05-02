@@ -176,6 +176,36 @@ print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized and reg
 
 # --- Async Events ---
 endstop_event = asyncio.Event()
+uart_data_event = asyncio.Event() # Event for UART RX data
+
+# --- UART RX IRQ Handler ---
+def uart_rx_irq_handler(uart_obj):
+   """IRQ handler for UART RX. Signals the event task."""
+   # Keep this extremely simple - just set the event
+   global uart_data_event
+   uart_data_event.set()
+
+# --- Initialize Slave UART for IRQ ---
+# We need a separate UART object instance to attach the IRQ handler reliably,
+# even though the Modbus library manages its own UART interaction internally via slave_serial_itf.
+try:
+   slave_uart_for_irq = UART(
+       id=SLAVE_UART_ID,
+       baudrate=SLAVE_BAUDRATE,
+       bits=8,
+       parity=None,
+       stop=1,
+       tx=SLAVE_TX_PIN_NUM, # Need TX pin defined even if only using RX IRQ
+       rx=SLAVE_RX_PIN_NUM,
+       timeout=10, # Short timeout, not critical for IRQ mode
+       timeout_char=2
+   )
+   # Register the IRQ handler
+   slave_uart_for_irq.irq(trigger=UART.RX_ANY, handler=uart_rx_irq_handler)
+   print_verbose("[INFO] Slave UART RX IRQ handler registered.", 2)
+except Exception as e:
+   print_verbose(f"[ERROR] Failed to initialize Slave UART for IRQ: {e}", 0)
+   slave_uart_for_irq = None # Ensure it's None if init fails
 
 # --- Homing ---
 def endstop_triggered_callback_irq(pin):
@@ -305,122 +335,154 @@ async def relay_control_task():
             relay_pin2.on()
             await asyncio.sleep_ms(RELAY_CONTROL_INTERVAL_MS) # Check state less frequently if ok
 
-async def modbus_slave_poll_task(modbus_handler_obj): # Pass Modbus handler object
-    """ Periodically processes incoming Modbus slave requests. """
-    print_verbose("[DEBUG SLAVE POLL TASK] Starting...", 3) # Added start message
-    debug_print_counter = 0
-    # Print approx every 20 seconds (200ms interval * 100 polls)
-    debug_print_interval = 100
-    while True:
-        try:
-            print_verbose("[DEBUG SLAVE POLL TASK] Polling...", 3) # Added polling message
-            # process() checks for incoming requests via the serial interface
-            # and handles them based on the configured register map.
-            # Callbacks (like handle_command_register_write) are executed within process()
-            result = modbus_handler_obj.process()
-            # ADDED DEBUG: Check register value immediately after process() - Reduced Frequency
-            if internal_state['VERBOSE_LEVEL'] >= 3:
-                debug_print_counter += 1
-                if debug_print_counter >= debug_print_interval:
-                    debug_print_counter = 0
-                    cmd_val_after_process = slave_registers['HREGS']['command']['val']
-                    # This print confirms the poll task is running, even if no commands received
-                    print_verbose(f"[DEBUG SLAVE POLL] Task running (CMD Reg: {cmd_val_after_process})", 3)
-        except Exception as e:
-            print_verbose(f"[ERROR] Modbus Slave processing error: {e}", 0)
+# --- Modbus Slave Task (Event-Driven) ---
+async def modbus_slave_event_task(modbus_handler_obj):
+   """Processes incoming Modbus slave requests triggered by UART RX IRQ."""
+   print_verbose("[DEBUG SLAVE EVENT TASK] Starting...", 3)
+   while True:
+       try:
+           # Wait for the IRQ handler to signal data arrival
+           await uart_data_event.wait()
+           uart_data_event.clear()  # Reset the event immediately
 
-        # Sleep briefly to yield control and define polling rate
-        await asyncio.sleep_ms(MODBUS_SLAVE_POLL_INTERVAL_MS)
+           # Add a tiny delay to allow UART buffer to fill slightly if needed,
+           # helps prevent processing partial frames sometimes. Tune if necessary.
+           await asyncio.sleep_ms(2)
+
+           print_verbose(f"[{time.ticks_ms()}] [DEBUG SLAVE EVENT] Event received, processing...", 3)
+           # process() checks for incoming requests via the serial interface
+           # and handles them based on the configured register map.
+           # Callbacks (like handle_command_register_write) are executed within process()
+           result = modbus_handler_obj.process()
+           if result: # Log if process() indicated activity
+                print_verbose(f"[{time.ticks_ms()}] [DEBUG SLAVE EVENT] Processed request, result: {result}", 3)
+
+       except Exception as e:
+           print_verbose(f"[{time.ticks_ms()}] [ERROR SLAVE EVENT] Modbus processing error: {e}", 0)
+
+       # Brief yield even if no event, allows other tasks to run smoothly
+       await asyncio.sleep_ms(1)
+
+
+# --- Modbus Slave Task (Polling - Kept for reference/fallback) ---
+# async def modbus_slave_poll_task(modbus_handler_obj): # Pass Modbus handler object
+#     """ Periodically processes incoming Modbus slave requests. """
+#     print_verbose("[DEBUG SLAVE POLL TASK] Starting...", 3) # Added start message
+#     debug_print_counter = 0
+#     # Print approx every 20 seconds (200ms interval * 100 polls)
+#     debug_print_interval = 100
+#     while True:
+#         try:
+#             print_verbose("[DEBUG SLAVE POLL TASK] Polling...", 3) # Added polling message
+#             # process() checks for incoming requests via the serial interface
+#             # and handles them based on the configured register map.
+#             # Callbacks (like handle_command_register_write) are executed within process()
+#             result = modbus_handler_obj.process()
+#             # ADDED DEBUG: Check register value immediately after process() - Reduced Frequency
+#             if internal_state['VERBOSE_LEVEL'] >= 3:
+#                 debug_print_counter += 1
+#                 if debug_print_counter >= debug_print_interval:
+#                     debug_print_counter = 0
+#                     cmd_val_after_process = slave_registers['HREGS']['command']['val']
+#                     # This print confirms the poll task is running, even if no commands received
+#                     print_verbose(f"[DEBUG SLAVE POLL] Task running (CMD Reg: {cmd_val_after_process})", 3)
+#         except Exception as e:
+#             print_verbose(f"[ERROR] Modbus Slave processing error: {e}", 0)
+#
+#         # Sleep briefly to yield control and define polling rate
+#         await asyncio.sleep_ms(MODBUS_SLAVE_POLL_INTERVAL_MS)
 
 
 # --- Main Application Logic ---
 async def main():
-    # Show manual locally
-    show_manual()
+   # Show manual locally
+   show_manual()
 
-    # Load configuration (loads into internal_state and updates slave_registers)
-    load_configuration()
-    # Ensure homing flag is initially false in register
-    update_input_registers(homing=False)
+   # Load configuration (loads into internal_state and updates slave_registers)
+   load_configuration()
+   # Ensure homing flag is initially false in register
+   update_input_registers(homing=False)
 
-    # Initialize Encoder (uses internal_state, updates slave_registers via callback)
-    # initialize_encoder(16, 17) # Pins for encoder A, B - DISABLED FOR STEP 1.1 TEST
-    print_verbose("[INFO TEST] Encoder Disabled.", 0)
+   # Initialize Encoder (uses internal_state, updates slave_registers via callback)
+   # initialize_encoder(16, 17) # Pins for encoder A, B - DISABLED FOR STEP 1.1 TEST
+   print_verbose("[INFO TEST] Encoder Disabled.", 0)
 
-    # --- Safety Stop ---
-    try:
-        print_verbose("[SAFETY] Ensuring VFD motor is stopped on startup...", 0)
-        vfd_master.stop_motor() # Use the global vfd_master instance
-        print_verbose("[SAFETY] Motor stop command sent. Waiting 5s...", 0)
-        await asyncio.sleep(5.0)
-        print_verbose("[SAFETY] Initial delay complete.", 1)
-    except Exception as e:
-        print_verbose(f"[ERROR] Failed initial VFD stop: {e}", 0)
-    # --- End Safety Stop ---
+   # --- Safety Stop ---
+   try:
+       print_verbose("[SAFETY] Ensuring VFD motor is stopped on startup...", 0)
+       vfd_master.stop_motor() # Use the global vfd_master instance
+       print_verbose("[SAFETY] Motor stop command sent. Waiting 5s...", 0)
+       await asyncio.sleep(5.0)
+       print_verbose("[SAFETY] Initial delay complete.", 1)
+   except Exception as e:
+       print_verbose(f"[ERROR] Failed initial VFD stop: {e}", 0)
+   # --- End Safety Stop ---
 
-    # Read initial VFD parameters if needed (e.g., max RPM)
-    try:
-        max_rpm = vfd_master.read_max_rpm()
-        if max_rpm:
-            print_verbose(f"[INFO] VFD Max RPM: {max_rpm}", 1)
-            # Update the Modbus register with the read value
-            update_input_registers(max_rpm=int(max_rpm)) # Use correct key 'max_rpm' and cast to int
-        else:
-            print_verbose("[WARNING] Failed to read VFD Max RPM.", 1)
-    except Exception as e:
-        print_verbose(f"[ERROR] Failed reading VFD Max RPM: {e}", 0)
+   # Read initial VFD parameters if needed (e.g., max RPM)
+   try:
+       max_rpm = vfd_master.read_max_rpm()
+       if max_rpm:
+           print_verbose(f"[INFO] VFD Max RPM: {max_rpm}", 1)
+           # Update the Modbus register with the read value
+           update_input_registers(max_rpm=int(max_rpm)) # Use correct key 'max_rpm' and cast to int
+       else:
+           print_verbose("[WARNING] Failed to read VFD Max RPM.", 1)
+   except Exception as e:
+       print_verbose(f"[ERROR] Failed reading VFD Max RPM: {e}", 0)
 
-    # --- Homing Sequence ---
-    # Start background tasks first
-    # status_task = asyncio.create_task(vfd_status_request_task(vfd_master)) # DISABLED FOR STEP 1.1 TEST
-    # relay_task = asyncio.create_task(relay_control_task()) # DISABLED FOR STEP 1.1 TEST
-    slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_handler)) # Start ONLY the slave poll task
-    print_verbose("[INFO TEST] VFD Status Task Disabled.", 0)
-    print_verbose("[INFO TEST] Relay Control Task Disabled.", 0)
-    await asyncio.sleep_ms(100) # Let slave poll task start
+   # --- Task Startup ---
+   # Start background tasks first
+   # status_task = asyncio.create_task(vfd_status_request_task(vfd_master)) # DISABLED FOR STEP 1.1 TEST
+   # relay_task = asyncio.create_task(relay_control_task()) # DISABLED FOR STEP 1.1 TEST
+   # slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_handler)) # Start ONLY the slave poll task
+   slave_event_task = asyncio.create_task(modbus_slave_event_task(modbus_slave_handler)) # Start the EVENT DRIVEN slave task
+   print_verbose("[INFO TEST] VFD Status Task Disabled.", 0)
+   print_verbose("[INFO TEST] Relay Control Task Disabled.", 0)
+   await asyncio.sleep_ms(100) # Let slave task start
 
-    # --- Homing Sequence DISABLED FOR STEP 1.1 TEST ---
-    # Temporarily cancel background tasks during homing
-    # print_verbose("[DEBUG] Cancelling background tasks for homing...", 3)
-    # status_task.cancel()
-    # relay_task.cancel()
-    # slave_poll_task.cancel() # Also cancel slave polling during homing
-    # try:
-    #     await asyncio.sleep_ms(100) # Allow cancellations
-    # except asyncio.CancelledError: pass
-    # print_verbose("[DEBUG] Background tasks cancelled.", 3)
-    #
-    # await homing(vfd_master) # Perform homing, passing the vfd_master instance
-    #
-    # # Restart background tasks
-    # print_verbose("[DEBUG] Restarting background tasks after homing...", 3)
-    # status_task = asyncio.create_task(vfd_status_request_task(vfd_master))
-    # relay_task = asyncio.create_task(relay_control_task())
-    # slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_handler)) # Pass the handler instance
-    print_verbose("[INFO TEST] Homing Sequence Disabled.", 0)
-    # --- End Homing Sequence ---
+   # --- Homing Sequence DISABLED FOR STEP 1.1 TEST ---
+   # Temporarily cancel background tasks during homing
+   # print_verbose("[DEBUG] Cancelling background tasks for homing...", 3)
+   # status_task.cancel()
+   # relay_task.cancel()
+   # slave_poll_task.cancel() # Also cancel slave polling during homing
+   # try:
+   #     await asyncio.sleep_ms(100) # Allow cancellations
+   # except asyncio.CancelledError: pass
+   # print_verbose("[DEBUG] Background tasks cancelled.", 3)
+   #
+   # await homing(vfd_master) # Perform homing, passing the vfd_master instance
+   #
+   # # Restart background tasks
+   # print_verbose("[DEBUG] Restarting background tasks after homing...", 3)
+   # status_task = asyncio.create_task(vfd_status_request_task(vfd_master))
+   # relay_task = asyncio.create_task(relay_control_task())
+   # slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_handler)) # Pass the handler instance
+   print_verbose("[INFO TEST] Homing Sequence Disabled.", 0)
+   # --- End Homing Sequence ---
 
-    print_verbose("[INFO] Main loop started. System operational (Minimal Tasks for Step 1.1).", 0)
+   print_verbose("[INFO] Main loop started. System operational (Minimal Tasks for Step 1.1).", 0)
 
-    # --- Main Execution Loop ---
-    while True:
-        # Command processing is handled by the callback
-        # Process settings changes from Modbus:
-        await process_modbus_commands(vfd_master) # Pass the vfd_master instance
+   # --- Main Execution Loop ---
+   while True:
+       # Command processing is handled by the callback and event task
+       # Process settings changes from Modbus (polled):
+       await process_modbus_commands(vfd_master) # Pass the vfd_master instance
 
-        # Main loop sleep (still needed to allow other tasks to run)
-        await asyncio.sleep_ms(MAIN_LOOP_SLEEP_MS)
+       # Main loop sleep (still needed to allow other tasks to run)
+       await asyncio.sleep_ms(MAIN_LOOP_SLEEP_MS)
 
 # --- Run ---
-try:
-    asyncio.run(main())
-except KeyboardInterrupt:
-    print_verbose("\n[INFO] Main Pico program interrupted by user.", 0)
-finally:
-    # Optional cleanup (e.g., ensure motor is stopped)
-    try:
-         vfd_master.stop_motor()
-         print_verbose("[SAFETY] Motor stop attempted on exit.", 0)
-    except Exception as e:
-         print_verbose(f"[ERROR] Failed to stop motor on exit: {e}", 0)
-    asyncio.new_event_loop() # Reset uasyncio state
+if __name__ == "__main__":
+   try:
+       asyncio.run(main())
+   except KeyboardInterrupt:
+       print_verbose("\n[INFO] Main Pico program interrupted by user.", 0)
+   finally:
+       # Optional cleanup (e.g., ensure motor is stopped)
+       try:
+            vfd_master.stop_motor()
+            print_verbose("[SAFETY] Motor stop attempted on exit.", 0)
+       except Exception as e:
+            print_verbose(f"[ERROR] Failed to stop motor on exit: {e}", 0)
+       asyncio.new_event_loop() # Reset uasyncio state
