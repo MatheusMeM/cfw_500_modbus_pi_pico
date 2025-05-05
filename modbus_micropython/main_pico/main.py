@@ -338,10 +338,13 @@ async def main():
     # Show manual locally
     show_manual()
 
-    # Load configuration (loads into internal_state and updates slave_registers)
-    load_configuration()
-    # Ensure homing flag is initially false in register
-    update_input_registers(homing=False)
+    # --- !!! START OF CHANGE: Temporarily disable config load !!! ---
+    # load_configuration() # Comment this out for the test
+    print_verbose("[TEST INFO] load_configuration() is DISABLED for this test.", 1)
+    # Ensure homing flag is initially false (or matches test value)
+    # The initial value is now set directly in utils.py
+    # update_input_registers(homing=False) # Not needed if value set in utils.py
+    # --- !!! END OF CHANGE !!! ---
 
     # Initialize Encoder (uses internal_state, updates slave_registers via callback)
     # initialize_encoder(16, 17) # Pins for encoder A, B - DISABLED FOR STEP 1.1 TEST
@@ -403,10 +406,19 @@ async def main():
     print_verbose("[INFO] Main loop started. System operational (Minimal Tasks for Step 1.1).", 0)
 
     # --- Main Execution Loop ---
+    loop_counter = 0 # Counter to reduce log spam
     while True:
         # Command processing is handled by the callback
         # Process settings changes from Modbus:
-        await process_modbus_commands(vfd_master) # Pass the vfd_master instance
+        # Comment out the call or the prints inside if too spammy
+        # await process_modbus_commands(vfd_master) # Pass the vfd_master instance
+
+        # --- !!! START OF CHANGE: Reduce log spam !!! ---
+        loop_counter += 1
+        if loop_counter % 500 == 0: # Print roughly every 10 seconds (500 * 20ms)
+             if internal_state['VERBOSE_LEVEL'] >= 3:
+                 print_verbose(f"[DEBUG MAIN LOOP] Still alive...", 3)
+        # --- !!! END OF CHANGE !!! ---
 
         # Main loop sleep (still needed to allow other tasks to run)
         await asyncio.sleep_ms(MAIN_LOOP_SLEEP_MS)
