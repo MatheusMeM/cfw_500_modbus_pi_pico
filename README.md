@@ -128,7 +128,7 @@ This project implements a system for controlling a Variable Frequency Drive (VFD
 
 | Address | Name              | Description                                                              | Default | Handled By        |
 |---------|-------------------|--------------------------------------------------------------------------|---------|-------------------|
-| 100     | `command`         | 1=Start, 2=Stop, 3=Reverse, 4=Reset Fault, 5=Calibrate, 0=No Action    | 0       | Callback (`main.py`) |
+| 100     | `command`         | 1=Start, 2=Stop, 3=Reverse, 4=Reset Fault, 5=Calibrate, 0=No Action      | 0       | Callback (`main.py`) |
 | 101     | `target_rpm`      | Target RPM for Start/Reverse commands                                    | 0       | Callback (`main.py`) |
 | 102     | `verbosity_level` | Verbosity level for Main Pico local prints (0-3)                         | 1       | Polling (`command_processor.py`) |
 | 103     | `encoder_mode`    | Encoder output mode (0=steps, 1=degrees)                                 | 1       | Polling (`command_processor.py`) |
@@ -186,52 +186,6 @@ This project implements a system for controlling a Variable Frequency Drive (VFD
 
 ---
 
-## Current Status & Debugging Plan (As of 2025-04-29 ~16:55)
-
-**Working:**
--   Relay Pico sends Modbus write commands (START, STOP, REVERSE, settings) to Main Pico.
--   Main Pico receives writes via Modbus Slave interface.
--   Main Pico's command callback (`handle_command_register_write`) correctly triggers for action commands (1, 2, 3, 4, 5).
--   Main Pico correctly extracts target RPM from multi-register writes (e.g., `start 1000`).
--   Main Pico successfully controls the VFD (start/stop/reverse) based on received commands.
--   Main Pico's settings polling (`process_modbus_commands`) appears functional.
--   Main Pico's internal tasks (VFD status polling, encoder reading) update internal state correctly.
-
-**Problem:**
--   **Relay Pico (Master) fails to reliably read Input Registers (status) from Main Pico (Slave) via Modbus Function Code 04.**
--   Symptoms: Relay Pico logs show `[ERROR] Modbus RX Error: no data received from slave` or read stale data (often all zeros), even when Main Pico logs confirm the motor is running and internal state is updated.
-
-**Debugging Roadmap:**
-
-*   **Phase 1: Isolate Main Pico Slave Response (In Progress)**
-    *   **Step 1.1:** Drastically Simplify Main Pico Load & Verify Slave Response
-        *   **Goal:** Determine if Main Pico can respond when minimally loaded.
-        *   **Action:** Disable VFD polling, relay control, encoder task, and homing on Main Pico. Set static initial values for Input Registers in `utils.py`. Add debug prints to `modbus_slave_poll_task`.
-        *   **Test:** Deploy modified Main Pico. Run both. Observe if Relay Pico can reliably read the static values.
-        *   **Current Sub-step:** Preparing to commit and test these changes.
-    *   **Step 1.2:** Explicitly Check Slave Response Construction (If 1.1 Fails)
-        *   **Goal:** Verify `umodbus` slave library attempts to build/send FC04 response.
-        *   **Action:** Add debug prints inside `umodbus/modbus.py` on Main Pico before UART write for FC04.
-*   **Phase 2: Investigate RS485 Link & Timing (If Phase 1 Fails)**
-    *   **Step 2.1:** Reduce Baud Rate (e.g., to 19200) on both Picos for Network 1.
-    *   **Step 2.2:** Investigate/Increase Modbus Timeouts (if possible in library/UART).
-    *   **Step 2.3:** Verify DE/RE Timing (Logs / Oscilloscope).
-*   **Phase 3: Check Wiring & Relay Reception (If Phase 2 Fails)**
-    *   **Step 3.1:** Physical Check (Wiring, GND).
-    *   **Step 3.2:** Explicitly Check Relay UART Reception (Log raw bytes).
-
----
-
-## Troubleshooting
-
-*(Existing troubleshooting steps remain relevant but add:)*
--   **Relay Pico Status Reads Failing:**
-    -   Follow the current debugging roadmap above.
-    -   Check for noise on the RS485 lines (Network 1).
-    -   Consider potential `uasyncio` scheduling conflicts or blocking code on the Main Pico.
-    -   Verify `umodbus` library versions are consistent if manually copied.
-
----
 
 ## Contributing
 
