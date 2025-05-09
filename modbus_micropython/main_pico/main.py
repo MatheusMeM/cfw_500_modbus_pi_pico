@@ -338,13 +338,20 @@ async def main():
     # Show manual locally
     show_manual()
 
-    # --- !!! START OF CHANGE: Temporarily disable config load !!! ---
-    # load_configuration() # Comment this out for the test
-    print_verbose("[TEST INFO] load_configuration() is DISABLED for this test.", 1)
-    # Ensure homing flag is initially false (or matches test value)
-    # The initial value is now set directly in utils.py
-    # update_input_registers(homing=False) # Not needed if value set in utils.py
+    # --- !!! START OF CHANGE: Re-enable config load !!! ---
+    load_configuration() # Re-enable this
+    print_verbose("[INFO] load_configuration() is ENABLED.", 1)
+    # The load_configuration in utils.py should now correctly load
+    # VERBOSE_LEVEL, encoder_offset_steps, and encoder_output_mode,
+    # and update the HREGS for verbosity/mode and IREG for offset.
+    # It should NOT overwrite the other initial test IREGS (rpm, vfd_status, etc.)
+    # if the config file doesn't have entries for them.
     # --- !!! END OF CHANGE !!! ---
+
+    # Ensure other Input Registers start with a known state (or let utils.py initial values be)
+    # If load_configuration might reset them, re-initialize them here for clarity before VFD task starts.
+    # For now, we assume utils.py sets initial non-zero values that persist unless explicitly overwritten.
+    update_input_registers(homing=False) # Explicitly set homing to false initially
 
     # Initialize Encoder (uses internal_state, updates slave_registers via callback)
     # initialize_encoder(16, 17) # Pins for encoder A, B - DISABLED FOR STEP 1.1 TEST
@@ -361,26 +368,31 @@ async def main():
         print_verbose(f"[ERROR] Failed initial VFD stop: {e}", 0)
     # --- End Safety Stop ---
 
-    # Read initial VFD parameters if needed (e.g., max RPM)
+    # --- Read initial VFD parameters (e.g., max RPM) ---
     try:
-        max_rpm = vfd_master.read_max_rpm()
-        if max_rpm:
-            print_verbose(f"[INFO] VFD Max RPM: {max_rpm}", 1)
-            # Update the Modbus register with the read value
-            update_input_registers(max_rpm=int(max_rpm)) # Use correct key 'max_rpm' and cast to int
+        max_rpm_val = vfd_master.read_max_rpm() # This reads from VFD
+        if max_rpm_val is not None:
+            print_verbose(f"[INFO] VFD Max RPM read: {max_rpm_val}", 1)
+            # --- !!! START OF CHANGE: Update Max RPM register with live data !!! ---
+            update_input_registers(max_rpm=int(max_rpm_val)) # Update IREG_MAX_RPM
+            # --- !!! END OF CHANGE !!! ---
         else:
             print_verbose("[WARNING] Failed to read VFD Max RPM.", 1)
+            # Optionally, set a default or keep the test value if read fails
+            # update_input_registers(max_rpm=slave_registers['IREGS']['max_rpm']['val']) # Keep test value
     except Exception as e:
         print_verbose(f"[ERROR] Failed reading VFD Max RPM: {e}", 0)
 
-    # --- Homing Sequence ---
-    # Start background tasks first
-    # status_task = asyncio.create_task(vfd_status_request_task(vfd_master)) # DISABLED FOR STEP 1.1 TEST
-    # relay_task = asyncio.create_task(relay_control_task()) # DISABLED FOR STEP 1.1 TEST
-    slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_handler)) # Start ONLY the slave poll task
-    print_verbose("[INFO TEST] VFD Status Task Disabled.", 0)
+
+    # --- Start Background Tasks ---
+    # --- !!! START OF CHANGE: Re-enable VFD Status Task !!! ---
+    status_task = asyncio.create_task(vfd_status_request_task(vfd_master)) # RE-ENABLE THIS
+    # relay_task = asyncio.create_task(relay_control_task()) # Keep relay task disabled
+    slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_handler))
+    print_verbose("[INFO] VFD Status Task ENABLED.", 0)
     print_verbose("[INFO TEST] Relay Control Task Disabled.", 0)
-    await asyncio.sleep_ms(100) # Let slave poll task start
+    await asyncio.sleep_ms(100) # Let tasks start
+    # --- !!! END OF CHANGE !!! ---
 
     # --- Homing Sequence DISABLED FOR STEP 1.1 TEST ---
     # Temporarily cancel background tasks during homing
@@ -400,27 +412,20 @@ async def main():
     # status_task = asyncio.create_task(vfd_status_request_task(vfd_master))
     # relay_task = asyncio.create_task(relay_control_task())
     # slave_poll_task = asyncio.create_task(modbus_slave_poll_task(modbus_slave_handler)) # Pass the handler instance
-    print_verbose("[INFO TEST] Homing Sequence Disabled.", 0)
-    # --- End Homing Sequence ---
+    print_verbose("[INFO TEST] Homing Sequence Disabled.", 0) # Keep homing disabled
 
-    print_verbose("[INFO] Main loop started. System operational (Minimal Tasks for Step 1.1).", 0)
+    print_verbose("[INFO] Main loop started. Monitoring VFD status.", 0)
 
-    # --- Main Execution Loop ---
-    loop_counter = 0 # Counter to reduce log spam
+    loop_counter = 0
     while True:
-        # Command processing is handled by the callback
-        # Process settings changes from Modbus:
-        # Comment out the call or the prints inside if too spammy
-        # await process_modbus_commands(vfd_master) # Pass the vfd_master instance
+        # process_modbus_commands is for HREGS, can be kept or commented if logs are too noisy
+        # await process_modbus_commands(vfd_master)
 
-        # --- !!! START OF CHANGE: Reduce log spam !!! ---
         loop_counter += 1
         if loop_counter % 500 == 0: # Print roughly every 10 seconds (500 * 20ms)
-             if internal_state['VERBOSE_LEVEL'] >= 3:
-                 print_verbose(f"[DEBUG MAIN LOOP] Still alive...", 3)
-        # --- !!! END OF CHANGE !!! ---
-
-        # Main loop sleep (still needed to allow other tasks to run)
+            if internal_state['VERBOSE_LEVEL'] >= 3:
+                print_verbose(f"[DEBUG MAIN LOOP] Still alive...", 3)
+        
         await asyncio.sleep_ms(MAIN_LOOP_SLEEP_MS)
 
 # --- Run ---

@@ -120,41 +120,41 @@ def save_configuration():
         print_verbose(f"[ERROR] Failed to save configuration: {e}", 0) # Local print
 
 def load_configuration():
-    """Loads settings from the configuration file into internal_state."""
+    """
+    Loads settings from the configuration file into internal_state
+    AND updates corresponding Modbus registers.
+    """
     try:
         with open(CONFIG_FILE, 'r') as f:
             config = json.load(f)
-        # Load into internal_state
+
         internal_state['encoder_offset_steps'] = config.get("encoder_offset_steps", 0)
         internal_state['encoder_output_mode'] = config.get("encoder_output_mode", "deg")
-        internal_state['VERBOSE_LEVEL'] = config.get("VERBOSE_LEVEL", 1)
+        # Use HREG default for VERBOSE_LEVEL if not in config
+        internal_state['VERBOSE_LEVEL'] = config.get("VERBOSE_LEVEL", slave_registers['HREGS']['verbosity_level']['val'])
 
-        # Update corresponding slave registers after loading internal state
+        # Update HREGS from loaded config
         slave_registers['HREGS']['verbosity_level']['val'] = internal_state['VERBOSE_LEVEL']
         slave_registers['HREGS']['encoder_mode']['val'] = 0 if internal_state['encoder_output_mode'] == "step" else 1
-        slave_registers['IREGS']['offset_steps']['val'] = internal_state['encoder_offset_steps'] # Make offset readable
+        
+        # --- !!! START OF CHANGE: Update IREG_OFFSET_STEPS from config !!! ---
+        # Only update IREGS that are part of the persistent configuration
+        slave_registers['IREGS']['offset_steps']['val'] = internal_state['encoder_offset_steps']
+        # Other IREGS (current_rpm, vfd_status, etc.) will retain their initial test values from
+        # the slave_registers definition until the vfd_status_request_task overwrites them.
+        # --- !!! END OF CHANGE !!! ---
 
-        print_verbose(f"[INFO] Loaded config: Offset={internal_state['encoder_offset_steps']}, Mode='{internal_state['encoder_output_mode']}', Verbose={internal_state['VERBOSE_LEVEL']}", 0) # Local print
-    except FileNotFoundError:
-        print_verbose("[WARNING] Configuration file not found. Using default settings.", 0) # Local print
-        # Ensure defaults match internal_state definition
-        internal_state['encoder_offset_steps'] = 0
-        internal_state['encoder_output_mode'] = "deg"
-        internal_state['VERBOSE_LEVEL'] = 1
-        # Update registers with defaults
-        slave_registers['HREGS']['verbosity_level']['val'] = 1
-        slave_registers['HREGS']['encoder_mode']['val'] = 1
-        slave_registers['IREGS']['offset_steps']['val'] = 0
-    except Exception as e:
-        print_verbose(f"[ERROR] Failed to load configuration: {e}", 0) # Local print
-        # Ensure defaults match internal_state definition on error
-        internal_state['encoder_offset_steps'] = 0
-        internal_state['encoder_output_mode'] = "deg"
-        internal_state['VERBOSE_LEVEL'] = 1
-        # Update registers with defaults
-        slave_registers['HREGS']['verbosity_level']['val'] = 1
-        slave_registers['HREGS']['encoder_mode']['val'] = 1
-        slave_registers['IREGS']['offset_steps']['val'] = 0
+        print_verbose(f"[INFO] Loaded config: Offset={internal_state['encoder_offset_steps']}, Mode='{internal_state['encoder_output_mode']}', Verbose={internal_state['VERBOSE_LEVEL']}", 0)
+
+    except Exception as e: # Broad catch for FileNotFoundError, json.JSONDecodeError, etc.
+        print_verbose(f"[WARNING] Failed to load config ({e}). Using default settings and initial register values.", 0)
+        # Ensure internal_state matches HREG/IREG defaults if loading fails
+        internal_state['encoder_offset_steps'] = slave_registers['IREGS']['offset_steps']['val'] # Use IREG initial
+        internal_state['encoder_output_mode'] = "deg" if slave_registers['HREGS']['encoder_mode']['val'] == 1 else "step"
+        internal_state['VERBOSE_LEVEL'] = slave_registers['HREGS']['verbosity_level']['val']
+        # Registers will keep their initial values defined above in slave_registers
+        # No need to explicitly set them here again, as they are already initialized.
+        # If they were changed before this function, this ensures internal_state aligns.
 
 # Function to update Modbus input registers from internal state or direct values
 def update_input_registers(rpm=None, vfd_status=None, enc_steps=None, enc_deg=None, fault=None, homing=None, offset=None, max_rpm=None): # Added max_rpm
