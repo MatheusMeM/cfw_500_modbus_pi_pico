@@ -149,27 +149,37 @@ def handle_command_register_write(reg_type, address, val):
             elif command_to_process == 5: # CALIBRATE
                 current_pos_rel_home = internal_state['encoder_raw_position'] - internal_state['encoder_zero_offset']
                 internal_state['encoder_offset_steps'] = current_pos_rel_home
-                update_input_registers(offset=internal_state['encoder_offset_steps'])
-                save_configuration()
+                # Use modbus_handler to update the IREG for offset
+                update_input_registers(modbus_slave_handler, offset=internal_state['encoder_offset_steps']) # Pass handler
+                save_configuration() # save_configuration saves internal_state
                 print_verbose(f"[ACTION CB] Encoder CALIBRATE processed. New offset: {internal_state['encoder_offset_steps']}", 0)
 
-            # Acknowledge by resetting the command register *in our dictionary*
-            slave_registers['HREGS']['command']['val'] = 0
-            internal_state['last_written_cmd'] = 0
-
-        except Exception as e:
+        except Exception as e: # This except corresponds to the try block for command execution
             print_verbose(f"[ERROR CB] Error processing command {command_to_process}: {e}", 0)
+        # Acknowledge by resetting the command register VIA THE HANDLER
+        # This try-except is for the acknowledgement itself
+        try:
+            modbus_slave_handler.set_hreg(REG_CMD, 0) # Use handler to set HREG
+            internal_state['last_written_cmd'] = 0 # Keep internal track if needed
+            print_verbose(f"[DEBUG CB] Command register {REG_CMD} cleared via handler.", 3)
+        except Exception as e:
+            print_verbose(f"[ERROR CB] Failed to clear command reg via handler: {e}", 0)
     else:
         # Command 0 written, potentially an acknowledgement clear by master.
-        print_verbose(f"[DEBUG CB] Command Register cleared (Value=0 received).", 3)
-        slave_registers['HREGS']['command']['val'] = 0
-        internal_state['last_written_cmd'] = 0
+        # print_verbose(f"[DEBUG CB] Command Register cleared (Value=0 received).", 3) # Original print
+        try:
+            modbus_slave_handler.set_hreg(REG_CMD, 0) # Also clear if 0 is written
+            internal_state['last_written_cmd'] = 0
+            print_verbose(f"[DEBUG CB] Command register {REG_CMD} (val 0) cleared via handler.", 3)
+        except Exception as e:
+            print_verbose(f"[ERROR CB] Failed to clear command reg (val 0) via handler: {e}", 0)
 
 # --- Assign Callbacks BEFORE Setup ---
 slave_registers['HREGS']['command']['on_set_cb'] = handle_command_register_write
 print_verbose("[INFO] Command register callback assigned to slave_registers dict.", 2)
 
 # 3. Setup the registers using the map from utils (NOW includes the callback)
+# IMPORTANT: slave_registers global dict from utils.py is used here for initial setup.
 modbus_slave_handler.setup_registers(registers=slave_registers)
 print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized and registers set up.", 2)
 
@@ -188,7 +198,7 @@ async def homing(cfw500_master_obj): # Pass the VFD master object
     endstop_event.clear()
     print_verbose("[INFO] Starting homing routine...", 0)
     internal_state['homing_completed'] = False
-    update_input_registers(homing=False) # Update Modbus register
+    update_input_registers(modbus_slave_handler, homing=False) # Update Modbus register # Pass handler
 
     homing_speed_rpm = 1000 # Use a reasonable default
     try:
@@ -228,12 +238,12 @@ async def homing(cfw500_master_obj): # Pass the VFD master object
             internal_state['encoder_zero_offset'] = internal_state['encoder_raw_position']
             print_verbose(f"[DEBUG] Homing: Encoder zero offset set to {internal_state['encoder_zero_offset']}", 3)
             internal_state['homing_completed'] = True
-            update_input_registers(homing=True) # Update Modbus register
+            update_input_registers(modbus_slave_handler, homing=True) # Update Modbus register # Pass handler
             print_verbose("[INFO] Homing complete.", 0)
         else:
             print_verbose("[WARNING] Homing: Failed to send stop command after endstop.", 0)
             internal_state['homing_completed'] = False # Mark as not completed
-            update_input_registers(homing=False)
+            update_input_registers(modbus_slave_handler, homing=False) # Pass handler
 
     except asyncio.TimeoutError:
         print_verbose("[ERROR] Homing: Timed out waiting for endstop.", 0)
@@ -244,7 +254,7 @@ async def homing(cfw500_master_obj): # Pass the VFD master object
         except Exception as e:
             print_verbose(f"[ERROR] Homing Timeout: Failed to send stop command: {e}", 0)
         internal_state['homing_completed'] = False
-        update_input_registers(homing=False)
+        update_input_registers(modbus_slave_handler, homing=False) # Pass handler
 
     finally:
         # Detach IRQ regardless of outcome
@@ -263,30 +273,30 @@ async def vfd_status_request_task(cfw500_master_obj): # Pass VFD master object
 
             if fault is not None:
                 internal_state['fault_detected'] = fault
-                update_input_registers(fault=fault)
+                update_input_registers(modbus_slave_handler, fault=fault) # Pass handler
                 # ADD DEBUG PRINT HERE
                 if internal_state['VERBOSE_LEVEL'] >= 3:
-                     print_verbose(f"[DEBUG VFD TASK] After fault update: FAULT_REG={slave_registers['IREGS']['fault_flag']['val']}", 3)
+                     print_verbose(f"[DEBUG VFD TASK] After fault update: FAULT_REG={modbus_slave_handler.get_ireg(REG_FAULT_FLAG)}", 3) # Use get_ireg
                 if fault and internal_state['VERBOSE_LEVEL'] >= 1:
                      print_verbose("[ALERT] VFD Fault Detected!", 1)
             else:
                  print_verbose("[WARNING] Failed to read VFD fault status.", 1)
 
             if status_p0680 is not None:
-                 update_input_registers(vfd_status=status_p0680)
+                 update_input_registers(modbus_slave_handler, vfd_status=status_p0680) # Pass handler
                  # ADD DEBUG PRINT HERE
                  if internal_state['VERBOSE_LEVEL'] >= 3:
-                      print_verbose(f"[DEBUG VFD TASK] After VFD status update: VFD_STATUS_REG={slave_registers['IREGS']['vfd_status']['val']}", 3)
+                      print_verbose(f"[DEBUG VFD TASK] After VFD status update: VFD_STATUS_REG={modbus_slave_handler.get_ireg(REG_VFD_STATUS)}", 3) # Use get_ireg
                  if internal_state['VERBOSE_LEVEL'] >= 3: # Keep existing P0680 print
                       print_verbose(f"[DEBUG] VFD Status P0680: 0x{status_p0680:04X}", 3)
             else:
                  print_verbose("[WARNING] Failed to read VFD status P0680.", 1)
 
             if current_rpm is not None:
-                 update_input_registers(rpm=current_rpm)
+                 update_input_registers(modbus_slave_handler, rpm=current_rpm) # Pass handler
                  # ADD DEBUG PRINT HERE
                  if internal_state['VERBOSE_LEVEL'] >= 3:
-                      print_verbose(f"[DEBUG VFD TASK] After RPM update: RPM_REG={slave_registers['IREGS']['current_rpm']['val']}", 3)
+                      print_verbose(f"[DEBUG VFD TASK] After RPM update: RPM_REG={modbus_slave_handler.get_ireg(REG_CURRENT_RPM)}", 3) # Use get_ireg
                  if internal_state['VERBOSE_LEVEL'] >= 2: # Keep existing speed print
                       print_verbose(f"[INFO] VFD Speed: {current_rpm:.1f} RPM", 2)
             else:
@@ -327,10 +337,11 @@ async def modbus_slave_poll_task(modbus_handler_obj): # Pass Modbus handler obje
             if internal_state['VERBOSE_LEVEL'] >= 3:
                 # This specific print will occur more frequently due to poll_debug_print_interval
                 if debug_print_counter % poll_debug_print_interval == 0:
-                    rpm_val_before = slave_registers['IREGS']['current_rpm']['val']
-                    offset_val_before = slave_registers['IREGS']['offset_steps']['val']
-                    max_rpm_val_before = slave_registers['IREGS']['max_rpm']['val'] # Also check max_rpm
-                    vfd_status_val_before = slave_registers['IREGS']['vfd_status']['val'] # And VFD status
+                    # Use get_ireg to read current values from the handler's perspective
+                    rpm_val_before = modbus_handler_obj.get_ireg(REG_CURRENT_RPM)
+                    offset_val_before = modbus_handler_obj.get_ireg(REG_OFFSET_STEPS)
+                    max_rpm_val_before = modbus_handler_obj.get_ireg(REG_MAX_RPM)
+                    vfd_status_val_before = modbus_handler_obj.get_ireg(REG_VFD_STATUS)
                     print_verbose(f"[DEBUG SLAVE POLL] BEFORE process(): RPM={rpm_val_before}, OFFSET={offset_val_before}, MAX_RPM={max_rpm_val_before}, VFD_STAT={vfd_status_val_before:#06x}", 3)
 
             result = modbus_handler_obj.process()
@@ -338,7 +349,7 @@ async def modbus_slave_poll_task(modbus_handler_obj): # Pass Modbus handler obje
             # General "Task running" print can remain less frequent
             if internal_state['VERBOSE_LEVEL'] >= 3:
                 if debug_print_counter % 100 == 0: # e.g., every 100 * 200ms = 20 seconds
-                    cmd_val_after = slave_registers['HREGS']['command']['val']
+                    cmd_val_after = modbus_handler_obj.get_hreg(REG_CMD) # Use get_hreg
                     print_verbose(f"[DEBUG SLAVE POLL] Task running (CMD Reg: {cmd_val_after})", 3)
             debug_print_counter += 1
         except Exception as e:
@@ -354,10 +365,12 @@ async def main():
     show_manual()
 
     # --- !!! START OF CHANGE: Re-enable config load !!! ---
-    load_configuration() # Re-enable this
+    # Pass modbus_slave_handler to load_configuration
+    load_configuration(modbus_slave_handler)
     print_verbose("[INFO] load_configuration() is ENABLED.", 1) # Keep this log
     # ADD DEBUG PRINT HERE
-    print_verbose(f"[DEBUG MAIN] After load_config: OFFSET_REG={slave_registers['IREGS']['offset_steps']['val']}, RPM_REG={slave_registers['IREGS']['current_rpm']['val']}", 3)
+    # Debug print after load_configuration can be removed or kept for one last check
+    # print_verbose(f"[DEBUG MAIN] After load_config: OFFSET_REG={modbus_slave_handler.get_ireg(REG_OFFSET_STEPS)}, RPM_REG={modbus_slave_handler.get_ireg(REG_CURRENT_RPM)}", 3)
 
     # The load_configuration in utils.py should now correctly load
     # VERBOSE_LEVEL, encoder_offset_steps, and encoder_output_mode,
@@ -369,7 +382,8 @@ async def main():
     # Ensure other Input Registers start with a known state (or let utils.py initial values be)
     # If load_configuration might reset them, re-initialize them here for clarity before VFD task starts.
     # For now, we assume utils.py sets initial non-zero values that persist unless explicitly overwritten.
-    update_input_registers(homing=False) # Explicitly set homing to false initially # Keep this
+    # Pass modbus_slave_handler to update_input_registers
+    update_input_registers(modbus_slave_handler, homing=False) # Explicitly set homing to false initially # Keep this
 
     # Initialize Encoder (uses internal_state, updates slave_registers via callback)
     # initialize_encoder(16, 17) # Pins for encoder A, B - DISABLED FOR STEP 1.1 TEST
@@ -392,9 +406,10 @@ async def main():
         if max_rpm_val is not None:
             print_verbose(f"[INFO] VFD Max RPM read: {max_rpm_val}", 1) # Keep this log
             # --- !!! START OF CHANGE: Update Max RPM register with live data !!! ---
-            update_input_registers(max_rpm=int(max_rpm_val)) # Update IREG_MAX_RPM
+            # Pass modbus_slave_handler
+            update_input_registers(modbus_slave_handler, max_rpm=int(max_rpm_val)) # Update IREG_MAX_RPM
             # ADD DEBUG PRINT HERE
-            print_verbose(f"[DEBUG MAIN] After max_rpm update: MAX_RPM_REG={slave_registers['IREGS']['max_rpm']['val']}", 3)
+            # print_verbose(f"[DEBUG MAIN] After max_rpm update: MAX_RPM_REG={modbus_slave_handler.get_ireg(REG_MAX_RPM)}", 3)
             # --- !!! END OF CHANGE !!! ---
         else:
             print_verbose("[WARNING] Failed to read VFD Max RPM.", 1)
