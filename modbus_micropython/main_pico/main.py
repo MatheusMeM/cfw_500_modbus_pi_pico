@@ -10,8 +10,10 @@ from command_processor import process_modbus_commands # Import the new processor
 from utils import (
     print_verbose, show_manual, load_configuration, save_configuration,
     internal_state, slave_registers, update_input_registers,
+    # Add REG_CURRENT_RPM and REG_VFD_STATUS to the import list
     REG_CMD, REG_TARGET_RPM, REG_VERBOSE, REG_ENC_MODE, REG_OFFSET_STEPS,
-    REG_FAULT_FLAG, REG_HOMING_FLAG, REG_MAX_RPM # Added REG_MAX_RPM
+    REG_FAULT_FLAG, REG_HOMING_FLAG, REG_MAX_RPM,
+    REG_CURRENT_RPM, REG_VFD_STATUS # These were missing for direct use in main.py
 )
 from umodbus.serial import Serial as ModbusRTUSerial # Renamed for clarity, handles serial comms
 from umodbus.modbus import Modbus # Base class for register handling
