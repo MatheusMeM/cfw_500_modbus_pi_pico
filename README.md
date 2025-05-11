@@ -24,9 +24,9 @@ This project implements a system for controlling a Variable Frequency Drive (VFD
 
 **Network 1 (Relay <-> Main):**
 -   **Protocol:** Modbus RTU over RS485
--   **Baud Rate:** 115200 (Configurable)
+-   **Baud Rate:** 19200 (Configurable, current default in code)
 -   **Roles:** Relay Pico (Master), Main Pico (Slave Address 1)
--   **Purpose:** Relay sends commands (writes to Holding Registers) and requests status (reads Input Registers) from Main Pico.
+-   **Purpose:** Relay sends commands (by writing to Main Pico's Holding Registers) and requests status (by reading Main Pico's Input Registers).
 
 **Network 2 (Main <-> VFD):**
 -   **Protocol:** Modbus RTU over RS485
@@ -41,17 +41,16 @@ This project implements a system for controlling a Variable Frequency Drive (VFD
 -   **Two-Pico Design:** Separates PC communication (Relay Pico) from real-time control (Main Pico).
 -   **Modbus Communication:** Uses Modbus RTU for both Inter-Pico (Network 1) and VFD (Network 2) communication via the `micropython-umodbus` library.
 -   **Motor Control via VFD (CFW500):**
-    -   Start, stop, and reverse the motor with specified RPM via Modbus commands from Relay to Main.
-    -   Read motor speed (RPM) and VFD status/faults via Main Pico polling VFD.
-    -   Reset VFD faults via Modbus command.
+    -   Start, stop, and reverse the motor. RPM can be specified with start/reverse, or the last set target RPM will be used.
+    -   Dynamic speed changes for a running motor via the `set_speed` command.
+    -   Reading motor speed (RPM) and VFD status/faults.
+    -   Resetting VFD faults.
 -   **Quadrature Encoder Integration:**
-    -   Read encoder positions in steps or degrees using hardware interrupts and `uasyncio`.
-    -   Support for zero-calibration (`calibrate` command) storing offset in `config.json`.
-    -   Homing Routine: Uses the encoder's Z signal connected as an endstop.
+    -   Reads encoder for position in steps/degrees. Supports zero-calibration (`calibrate` command storing offset in `config.json`). Homing routine using Z-signal endstop (to be fully tested).
 -   **Command Handling (Main Pico):**
-    -   **Action Commands (Start, Stop, Reverse, Reset, Calibrate):** Handled immediately via a Modbus register write callback (`handle_command_register_write` in `main.py`) for responsiveness. Target RPM is read from the Modbus write payload if available (multi-register write).
+    -   **Action Commands (Start, Stop, Reverse, Reset, Calibrate, Set Speed):** Handled via Modbus register write callback (`handle_command_register_write` in `main_pico/main.py`). Target RPM is taken from the command payload if provided, or from the current `REG_TARGET_RPM` for parameter-less start/reverse.
     -   **Settings Commands (Verbose Level, Encoder Mode):** Handled by polling Holding Registers in the main loop (`process_modbus_commands` in `command_processor.py`).
--   **Status Reporting:** Main Pico updates Input Registers periodically (e.g., RPM, VFD Status, Encoder Position, Flags). Relay Pico periodically reads these Input Registers and displays them on the PC.
+-   **Status Reporting:** Main Pico periodically updates its Modbus Input Registers with live data (e.g., RPM, VFD Status). Relay Pico periodically reads and displays these values.
 -   **Configuration Persistence:** Saves `encoder_offset_steps`, `encoder_output_mode`, and `VERBOSE_LEVEL` to `config.json` on the Main Pico.
 -   **Asynchronous Operation:** Uses `uasyncio` for managing concurrent tasks (Modbus polling, VFD status checks, relay control, encoder handling).
 -   **Verbose Levels (0-3):** Controls local debug output on the Main Pico.
@@ -75,8 +74,9 @@ This project implements a system for controlling a Variable Frequency Drive (VFD
 
 -   **MicroPython Firmware:** Flashed onto both Picos (v1.17+ recommended).
 -   **Required Libraries:**
-    -   `uasyncio` (built-in)
-    -   `umodbus` (included in `lib/` directories for both Picos)
+    -   `uasyncio` (built-in MicroPython library)
+    -   `umodbus` (Modbus library, included in `lib/` directories for both Picos)
+    -   `encoder.py` (Quadrature encoder driver by Peter Hinch, included in `main_pico/`)
 -   **Host PC Software:** Serial terminal emulator (e.g., Thonny REPL, PuTTY).
 
 ---
@@ -117,6 +117,7 @@ This project implements a system for controlling a Variable Frequency Drive (VFD
 
 *Note: Ensure all devices share a common ground.*
 *Note: Encoder power (+5V/Brown, GND/Blue) should be connected appropriately.*
+*Critical Verification: All GPIO pin numbers listed in the tables above for both Relay Pico and Main Pico (including UARTs, DE/RE control, Encoder signals, Relays, and Endstop) must be meticulously verified against the current constants defined in `relay_pico/main.py` and `main_pico/main.py` to ensure 100% accuracy.*
 
 ---
 
@@ -128,8 +129,8 @@ This project implements a system for controlling a Variable Frequency Drive (VFD
 
 | Address | Name              | Description                                                              | Default | Handled By        |
 |---------|-------------------|--------------------------------------------------------------------------|---------|-------------------|
-| 100     | `command`         | 1=Start, 2=Stop, 3=Reverse, 4=Reset Fault, 5=Calibrate, 0=No Action    | 0       | Callback (`main.py`) |
-| 101     | `target_rpm`      | Target RPM for Start/Reverse commands                                    | 0       | Callback (`main.py`) |
+| 100     | `command`         | 1=Start, 2=Stop, 3=Reverse, 4=Reset Fault, 5=Calibrate. Command 0 is used with REG_TARGET_RPM for set_speed functionality. | 0       | Callback (`main.py`) |
+| 101     | `target_rpm`      | Target RPM for Start/Reverse/Set_Speed commands. Used by set_speed (cmd 0), or by start/reverse (cmd 1 or 3) if no RPM is explicitly sent with those commands. | 0       | Callback (`main.py`) |
 | 102     | `verbosity_level` | Verbosity level for Main Pico local prints (0-3)                         | 1       | Polling (`command_processor.py`) |
 | 103     | `encoder_mode`    | Encoder output mode (0=steps, 1=degrees)                                 | 1       | Polling (`command_processor.py`) |
 
@@ -143,8 +144,8 @@ This project implements a system for controlling a Variable Frequency Drive (VFD
 | 3       | `encoder_degrees` | Encoder Position (Degrees, relative to offset)        | x100   | `encoder_module.py`       |
 | 4       | `fault_flag`      | VFD Fault Detected Flag (0=No, 1=Fault)               | No     | `vfd_status_request_task` |
 | 5       | `homing_flag`     | Homing Completed Flag (0=No, 1=Yes)                   | No     | `homing()` in `main.py`   |
-| 6       | `offset_steps`    | Calibrated Encoder Offset (Steps)                     | No     | `load_configuration`, Callback |
-| 7       | `max_rpm`         | Configured Max RPM from VFD (P0208)                   | No     | `main()` startup          |
+| 6       | `offset_steps`    | Calibrated Encoder Offset (Steps)                     | No     | `load_configuration()` from `config.json`, `calibrate` command callback. |
+| 7       | `max_rpm`         | Configured Max RPM from VFD (P0208)                   | No     | `main()` startup VFD read, `update_input_registers`. |
 
 ---
 
@@ -171,10 +172,12 @@ This project implements a system for controlling a Variable Frequency Drive (VFD
 
 *(See Modbus Register Map for underlying mechanism)*
 
--   `start [rpm]`: Start motor forward (Default 1000 RPM). Writes HReg 100=1, HReg 101=rpm.
+-   `start [rpm]`: Start motor forward.
+    - If `[rpm]` is provided, it sets that as the target. If `[rpm]` is omitted, the Main Pico uses its current `REG_TARGET_RPM` value (see `set_speed`). Writes HReg 100=1. If `[rpm]` is provided, also writes rpm to HReg 101.
 -   `stop`: Stop motor. Writes HReg 100=2.
--   `reverse [rpm]`: Start motor reverse (Default 1000 RPM). Writes HReg 100=3, HReg 101=rpm.
--   `set_speed [rpm]`: Update target RPM. Writes HReg 100=0, HReg 101=rpm.
+-   `reverse [rpm]`: Start motor reverse.
+    - If `[rpm]` is provided, it sets that as the target. If `[rpm]` is omitted, Main Pico uses current `REG_TARGET_RPM`. Writes HReg 100=3. If `[rpm]` is provided, also writes rpm to HReg 101.
+-   `set_speed [rpm]`: Updates the motor's target speed to `[rpm]`. If the motor is running, its speed will change. If stopped, this sets the speed for the next parameter-less start/reverse command. Writes HReg 100=0 and rpm to HReg 101.
 -   `reset_fault`: Attempt VFD fault reset. Writes HReg 100=4.
 -   `calibrate`: Set current encoder position as zero offset. Writes HReg 100=5.
 -   `set_verbose [0-3]`: Set Main Pico local print level. Writes HReg 102=level.
@@ -182,54 +185,21 @@ This project implements a system for controlling a Variable Frequency Drive (VFD
 -   `status`: (Local Relay command) Prints last read status from Main Pico Input Registers.
 -   `help`: (Local Relay command) Show command list.
 
+## Troubleshooting (General)
+
+-   **Verify Wiring:** Double-check all RS485 (A/B lines, DE/RE control signals), encoder (if enabled), and power connections. Ensure all devices share a common ground.
+-   **Check Baud Rates & Serial Parameters:**
+    -   Network 1 (Relay Pico <-> Main Pico): Ensure both Picos are configured for the same RS485 baud rate (e.g., 19200, 8-N-1) in their respective code (`relay_pico/main.py` and `main_pico/main.py`).
+    -   Network 2 (Main Pico <-> VFD): Ensure the Main Pico's VFD communication settings match the VFD's Modbus parameters (baud rate, slave ID, data bits, parity, stop bits).
+-   **Modbus Slave Addresses:** Confirm the Main Pico slave address (Network 1) and VFD slave address (Network 2) in the code match hardware/VFD configurations.
+-   **Host PC Serial Terminal:** Ensure your serial terminal application (e.g., Thonny REPL, PuTTY) is connected to the Relay Pico's USB serial COM port and configured with the correct baud rate for USB serial communication (typically 115200).
+-   **Main Pico Logs:** Observe the Main Pico's USB serial output (via Thonny REPL or another terminal connected to Main Pico's USB). If `VERBOSE_LEVEL` (HReg 102) is > 0, it will print status and error messages. This is invaluable for diagnosing issues on the Main Pico.
+-   **Relay Pico Logs:** Check the Relay Pico's USB serial output for Modbus communication errors (e.g., "no data received from slave," "invalid CRC") or status messages.
+-   **RS485 Transceiver DE/RE Logic:** Ensure the DE/RE pins on the RS485 converters are correctly wired to the Pico GPIOs specified in the "Connections" section and that the `ctrl_pin` is correctly assigned in the `ModbusRTUMaster` / `ModbusRTUSerial` initializations.
+-   **Power Supplies:** Verify adequate and stable power for both Picos, the VFD, and the encoder.
+
+---
 *(Note: `read_speed`, `read_offset`, `read_max_rpm` commands are effectively replaced by observing the periodic `status` output from the Relay Pico).*
-
----
-
-## Current Status & Debugging Plan (As of 2025-04-29 ~16:55)
-
-**Working:**
--   Relay Pico sends Modbus write commands (START, STOP, REVERSE, settings) to Main Pico.
--   Main Pico receives writes via Modbus Slave interface.
--   Main Pico's command callback (`handle_command_register_write`) correctly triggers for action commands (1, 2, 3, 4, 5).
--   Main Pico correctly extracts target RPM from multi-register writes (e.g., `start 1000`).
--   Main Pico successfully controls the VFD (start/stop/reverse) based on received commands.
--   Main Pico's settings polling (`process_modbus_commands`) appears functional.
--   Main Pico's internal tasks (VFD status polling, encoder reading) update internal state correctly.
-
-**Problem:**
--   **Relay Pico (Master) fails to reliably read Input Registers (status) from Main Pico (Slave) via Modbus Function Code 04.**
--   Symptoms: Relay Pico logs show `[ERROR] Modbus RX Error: no data received from slave` or read stale data (often all zeros), even when Main Pico logs confirm the motor is running and internal state is updated.
-
-**Debugging Roadmap:**
-
-*   **Phase 1: Isolate Main Pico Slave Response (In Progress)**
-    *   **Step 1.1:** Drastically Simplify Main Pico Load & Verify Slave Response
-        *   **Goal:** Determine if Main Pico can respond when minimally loaded.
-        *   **Action:** Disable VFD polling, relay control, encoder task, and homing on Main Pico. Set static initial values for Input Registers in `utils.py`. Add debug prints to `modbus_slave_poll_task`.
-        *   **Test:** Deploy modified Main Pico. Run both. Observe if Relay Pico can reliably read the static values.
-        *   **Current Sub-step:** Preparing to commit and test these changes.
-    *   **Step 1.2:** Explicitly Check Slave Response Construction (If 1.1 Fails)
-        *   **Goal:** Verify `umodbus` slave library attempts to build/send FC04 response.
-        *   **Action:** Add debug prints inside `umodbus/modbus.py` on Main Pico before UART write for FC04.
-*   **Phase 2: Investigate RS485 Link & Timing (If Phase 1 Fails)**
-    *   **Step 2.1:** Reduce Baud Rate (e.g., to 19200) on both Picos for Network 1.
-    *   **Step 2.2:** Investigate/Increase Modbus Timeouts (if possible in library/UART).
-    *   **Step 2.3:** Verify DE/RE Timing (Logs / Oscilloscope).
-*   **Phase 3: Check Wiring & Relay Reception (If Phase 2 Fails)**
-    *   **Step 3.1:** Physical Check (Wiring, GND).
-    *   **Step 3.2:** Explicitly Check Relay UART Reception (Log raw bytes).
-
----
-
-## Troubleshooting
-
-*(Existing troubleshooting steps remain relevant but add:)*
--   **Relay Pico Status Reads Failing:**
-    -   Follow the current debugging roadmap above.
-    -   Check for noise on the RS485 lines (Network 1).
-    -   Consider potential `uasyncio` scheduling conflicts or blocking code on the Main Pico.
-    -   Verify `umodbus` library versions are consistent if manually copied.
 
 ---
 
