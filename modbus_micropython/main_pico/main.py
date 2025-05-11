@@ -100,105 +100,113 @@ def handle_command_register_write(reg_type, address, val):
     command_to_process = 0
     target_rpm_val = 0 # Default RPM
 
-    if isinstance(val, list):
-        command_to_process = val[0] # First value is the command
+    # Determine command_to_process and target_rpm_val
+    if isinstance(val, list): # Typically from write_multiple_registers (e.g., CMD + RPM)
+        command_to_process = val[0]
         if len(val) > 1:
-            # ASSUMPTION: If val is a list > 1 element, the second element is the RPM
-            # This depends on the Relay Pico writing CMD and RPM together using
-            # function code 16 (Write Multiple Registers).
             target_rpm_val = val[1]
-            print_verbose(f"[DEBUG CB] Extracted RPM from multi-register write: {target_rpm_val}", 3)
-        else:
-            # Only command was written, try reading RPM from our dictionary (might be stale)
-            try:
-                target_rpm_val = slave_registers['HREGS']['target_rpm']['val']
-                print_verbose(f"[DEBUG CB] Read RPM from dictionary (single write): {target_rpm_val}", 3)
-            except Exception as e:
-                print_verbose(f"[ERROR CB] Failed to read target RPM from dict: {e}", 0)
-                target_rpm_val = 0
-    else:
-        # Single value write (likely just the command)
+            print_verbose(f"[DEBUG CB] Extracted RPM ({target_rpm_val}) from multi-register write.", 3)
+        # else: # Command only in list, RPM should be fetched if needed for START/REVERSE
+              # This case is less likely if Relay sends single for CMD_ONLY or multi for CMD+RPM
+              # For START/REVERSE without explicit RPM, 'val' will be a single int.
+    else: # Typically from write_single_register (e.g., just the command)
         command_to_process = val
-        # Try reading RPM from our dictionary (might be stale)
-        try:
-            target_rpm_val = slave_registers['HREGS']['target_rpm']['val']
-            print_verbose(f"[DEBUG CB] Read RPM from dictionary (single write): {target_rpm_val}", 3)
-        except Exception as e:
-            print_verbose(f"[ERROR CB] Failed to read target RPM from dict: {e}", 0)
-            target_rpm_val = 0
+        # target_rpm_val remains 0 initially if only command is sent.
+        # We will fetch it from HREG_TARGET_RPM if needed for START/REVERSE.
+        print_verbose(f"[DEBUG CB] Single value write for command: {command_to_process}", 3)
 
-    print_verbose(f"[DEBUG CB] Command Register Write Detected: Value={command_to_process}, Target RPM={target_rpm_val}", 3) # Added target_rpm_val here
+    print_verbose(f"[DEBUG CB] Command Register Write: Value={command_to_process}, Explicit Target RPM={target_rpm_val}", 3)
 
-    # --- !!! START OF MODIFICATION FOR SET_SPEED ---
-    if command_to_process == 0: # This is our "set_speed" command now
-        # If command is 0, we assume it's a speed update request for a potentially running motor,
-        # or pre-setting speed for a subsequent start/reverse.
-        # For now, let's make it so that if a speed is sent with command 0,
-        # we attempt to update the VFD's speed reference directly.
-        # A more advanced check would be to see if the VFD is actually running.
+    if command_to_process == 0: # SET_SPEED
+        # This logic assumes target_rpm_val was explicitly sent if 'val' was a list [0, rpm].
+        # If 'val' was just '0' (unlikely for set_speed from Relay), target_rpm_val would be 0 here.
+        # The Relay Pico's set_speed always sends [0, rpm].
+        if not isinstance(val, list) or len(val) < 2 : # Should not happen with current Relay set_speed
+             print_verbose(f"[WARNING CB] SET_SPEED (Cmd 0) received without explicit RPM in payload. Using stored Target RPM.", 1)
+             target_rpm_val = modbus_slave_handler.get_hreg(REG_TARGET_RPM) # Get stored RPM
+
         try:
-            if target_rpm_val > 0: # Only set speed if RPM is valid
-                # We could check P0680 to see if motor is actually running before sending.
-                # For simplicity now, just send the speed reference.
-                # The VFD itself might ignore this if it's not in a state to accept speed changes (e.g., stopped).
+            if target_rpm_val > 0:
                 vfd_master.set_speed_reference(target_rpm_val)
-                print_verbose(f"[ACTION CB] SET_SPEED command: VFD speed reference updated to {target_rpm_val} RPM.", 0)
+                print_verbose(f"[ACTION CB] SET_SPEED: VFD speed ref updated to {target_rpm_val} RPM.", 0)
             else:
-                print_verbose(f"[INFO CB] SET_SPEED command with RPM <= 0. Speed reference not sent. Target RPM register is updated.", 1)
-
-            # Update the HREG_TARGET_RPM in the modbus handler as well, so it's readable if someone polls HREGS
-            modbus_slave_handler.set_hreg(REG_TARGET_RPM, target_rpm_val)
-
+                print_verbose(f"[INFO CB] SET_SPEED with RPM <= 0. Speed ref not sent.", 1)
+            modbus_slave_handler.set_hreg(REG_TARGET_RPM, target_rpm_val) # Ensure HREG is updated
         except Exception as e:
-            print_verbose(f"[ERROR CB] Error processing SET_SPEED (command 0): {e}", 0)
-        # Always clear the command portion of the register
+            print_verbose(f"[ERROR CB] Error processing SET_SPEED (Cmd 0): {e}", 0)
+        # Clear command register
         try:
             modbus_slave_handler.set_hreg(REG_CMD, 0)
             internal_state['last_written_cmd'] = 0
-            print_verbose(f"[DEBUG CB] Command register {REG_CMD} (for SET_SPEED) cleared via handler.", 3)
+            print_verbose(f"[DEBUG CB] REG_CMD (for SET_SPEED) cleared.", 3)
         except Exception as e:
-            print_verbose(f"[ERROR CB] Failed to clear command reg for SET_SPEED: {e}", 0)
+            print_verbose(f"[ERROR CB] Failed to clear REG_CMD for SET_SPEED: {e}", 0)
 
-    elif command_to_process != 0: # START, STOP, REVERSE, RESET, CALIBRATE
-    # --- !!! END OF MODIFICATION FOR SET_SPEED ---
-        print_verbose(f"[DEBUG CB] Processing Action Command: {command_to_process}, RPM: {target_rpm_val}", 3)
-        # Update the HREG_TARGET_RPM if a new RPM came with this action command
-        # This is important if a START/REVERSE also carries an RPM.
-        if isinstance(val, list) and len(val) > 1:
-             modbus_slave_handler.set_hreg(REG_TARGET_RPM, target_rpm_val)
+    elif command_to_process in [1, 3]: # START (1) or REVERSE (3)
+        # --- !!! START OF MODIFICATION FOR MAIN PICO 'start/reverse' COMMAND !!! ---
+        rpm_to_use = 0
+        if isinstance(val, list) and len(val) > 1: # RPM explicitly provided with START/REVERSE
+            rpm_to_use = val[1] # This was target_rpm_val
+            modbus_slave_handler.set_hreg(REG_TARGET_RPM, rpm_to_use) # Store this explicit RPM
+            print_verbose(f"[DEBUG CB] START/REVERSE with explicit RPM: {rpm_to_use}", 3)
+        else: # No explicit RPM with START/REVERSE (val was just the command code)
+            rpm_to_use = modbus_slave_handler.get_hreg(REG_TARGET_RPM) # Use stored Target RPM
+            print_verbose(f"[DEBUG CB] START/REVERSE using stored Target RPM: {rpm_to_use}", 3)
 
+        if rpm_to_use <= 0: # If stored RPM is also 0 or invalid, use a safe default
+            rpm_to_use = 1000 # Safe default if no valid RPM found
+            print_verbose(f"[WARNING CB] No valid RPM for START/REVERSE, using default: {rpm_to_use}", 1)
+            modbus_slave_handler.set_hreg(REG_TARGET_RPM, rpm_to_use) # Also update HREG with this default
+
+        print_verbose(f"[DEBUG CB] Processing Action Command: {command_to_process}, Effective RPM: {rpm_to_use}", 3)
+        # --- !!! END OF MODIFICATION FOR MAIN PICO 'start/reverse' COMMAND !!! ---
         try:
             if command_to_process == 1: # START
-                vfd_master.start_motor(target_rpm_val)
-                print_verbose(f"[ACTION CB] Motor START processed (RPM: {target_rpm_val}).", 0)
-            elif command_to_process == 2: # STOP
+                vfd_master.start_motor(rpm_to_use)
+                print_verbose(f"[ACTION CB] Motor START processed (RPM: {rpm_to_use}).", 0)
+            elif command_to_process == 3: # REVERSE
+                vfd_master.reverse_motor(rpm_to_use)
+                print_verbose(f"[ACTION CB] Motor REVERSE processed (RPM: {rpm_to_use}).", 0)
+        except Exception as e:
+            print_verbose(f"[ERROR CB] Error processing START/REVERSE: {e}", 0)
+        # Clear command register
+        try:
+            modbus_slave_handler.set_hreg(REG_CMD, 0)
+            internal_state['last_written_cmd'] = 0
+            print_verbose(f"[DEBUG CB] Action Cmd {command_to_process}: REG_CMD cleared.", 3)
+        except Exception as e:
+            print_verbose(f"[ERROR CB] Failed to clear REG_CMD for action {command_to_process}: {e}", 0)
+
+    elif command_to_process in [2, 4, 5]: # STOP, RESET_FAULT, CALIBRATE (no RPM directly used for action)
+        rpm_from_payload = 0 # Default if not multi-register
+        if isinstance(val, list) and len(val) > 1:
+             rpm_from_payload = val[1] # This would be target_rpm_val if sent
+             modbus_slave_handler.set_hreg(REG_TARGET_RPM, rpm_from_payload) # Update HREG_TARGET_RPM if sent
+             print_verbose(f"[DEBUG CB] HREG_TARGET_RPM updated to {rpm_from_payload} from command {command_to_process} payload.", 3)
+
+        print_verbose(f"[DEBUG CB] Processing Action Command: {command_to_process} (RPM in payload if any: {rpm_from_payload})", 3)
+        try:
+            if command_to_process == 2: # STOP
                 vfd_master.stop_motor()
                 print_verbose(f"[ACTION CB] Motor STOP processed.", 0)
-            elif command_to_process == 3: # REVERSE
-                vfd_master.reverse_motor(target_rpm_val)
-                print_verbose(f"[ACTION CB] Motor REVERSE processed (RPM: {target_rpm_val}).", 0)
             elif command_to_process == 4: # RESET_FAULT
                 vfd_master.reset_fault()
                 print_verbose(f"[ACTION CB] VFD Fault RESET processed.", 0)
             elif command_to_process == 5: # CALIBRATE
                 current_pos_rel_home = internal_state['encoder_raw_position'] - internal_state['encoder_zero_offset']
                 internal_state['encoder_offset_steps'] = current_pos_rel_home
-                # Use modbus_handler to update the IREG for offset
-                update_input_registers(modbus_slave_handler, offset=internal_state['encoder_offset_steps']) # Pass handler
-                save_configuration() # save_configuration saves internal_state
+                update_input_registers(modbus_slave_handler, offset=internal_state['encoder_offset_steps'])
+                save_configuration()
                 print_verbose(f"[ACTION CB] Encoder CALIBRATE processed. New offset: {internal_state['encoder_offset_steps']}", 0)
-
-        except Exception as e: # This except corresponds to the try block for command execution
+        except Exception as e:
             print_verbose(f"[ERROR CB] Error processing command {command_to_process}: {e}", 0)
-        # Acknowledge by resetting the command register VIA THE HANDLER
-        # This try-except is for the acknowledgement itself
+        # Clear command register
         try:
             modbus_slave_handler.set_hreg(REG_CMD, 0)
             internal_state['last_written_cmd'] = 0
-            print_verbose(f"[DEBUG CB] Action Command {command_to_process}: register {REG_CMD} cleared via handler.", 3)
+            print_verbose(f"[DEBUG CB] Action Cmd {command_to_process}: REG_CMD cleared.", 3)
         except Exception as e:
-            print_verbose(f"[ERROR CB] Failed to clear command reg for action {command_to_process}: {e}", 0)
-    # Note: The original 'else' for command_to_process == 0 is now handled by the new 'if command_to_process == 0:' block above.
+            print_verbose(f"[ERROR CB] Failed to clear REG_CMD for action {command_to_process}: {e}", 0)
 
 # --- Assign Callbacks BEFORE Setup ---
 slave_registers['HREGS']['command']['on_set_cb'] = handle_command_register_write
