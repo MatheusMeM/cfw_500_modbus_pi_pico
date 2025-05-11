@@ -127,14 +127,46 @@ def handle_command_register_write(reg_type, address, val):
             print_verbose(f"[ERROR CB] Failed to read target RPM from dict: {e}", 0)
             target_rpm_val = 0
 
-    print_verbose(f"[DEBUG CB] Command Register Write Detected: Value={command_to_process}", 3)
+    print_verbose(f"[DEBUG CB] Command Register Write Detected: Value={command_to_process}, Target RPM={target_rpm_val}", 3) # Added target_rpm_val here
 
-    if command_to_process != 0:
-        # RPM value determined above
+    # --- !!! START OF MODIFICATION FOR SET_SPEED ---
+    if command_to_process == 0: # This is our "set_speed" command now
+        # If command is 0, we assume it's a speed update request for a potentially running motor,
+        # or pre-setting speed for a subsequent start/reverse.
+        # For now, let's make it so that if a speed is sent with command 0,
+        # we attempt to update the VFD's speed reference directly.
+        # A more advanced check would be to see if the VFD is actually running.
+        try:
+            if target_rpm_val > 0: # Only set speed if RPM is valid
+                # We could check P0680 to see if motor is actually running before sending.
+                # For simplicity now, just send the speed reference.
+                # The VFD itself might ignore this if it's not in a state to accept speed changes (e.g., stopped).
+                vfd_master.set_speed_reference(target_rpm_val)
+                print_verbose(f"[ACTION CB] SET_SPEED command: VFD speed reference updated to {target_rpm_val} RPM.", 0)
+            else:
+                print_verbose(f"[INFO CB] SET_SPEED command with RPM <= 0. Speed reference not sent. Target RPM register is updated.", 1)
 
-        print_verbose(f"[DEBUG CB] Processing Command: {command_to_process}, RPM: {target_rpm_val}", 3)
+            # Update the HREG_TARGET_RPM in the modbus handler as well, so it's readable if someone polls HREGS
+            modbus_slave_handler.set_hreg(REG_TARGET_RPM, target_rpm_val)
 
-        # --- Execute Command ---
+        except Exception as e:
+            print_verbose(f"[ERROR CB] Error processing SET_SPEED (command 0): {e}", 0)
+        # Always clear the command portion of the register
+        try:
+            modbus_slave_handler.set_hreg(REG_CMD, 0)
+            internal_state['last_written_cmd'] = 0
+            print_verbose(f"[DEBUG CB] Command register {REG_CMD} (for SET_SPEED) cleared via handler.", 3)
+        except Exception as e:
+            print_verbose(f"[ERROR CB] Failed to clear command reg for SET_SPEED: {e}", 0)
+
+    elif command_to_process != 0: # START, STOP, REVERSE, RESET, CALIBRATE
+    # --- !!! END OF MODIFICATION FOR SET_SPEED ---
+        print_verbose(f"[DEBUG CB] Processing Action Command: {command_to_process}, RPM: {target_rpm_val}", 3)
+        # Update the HREG_TARGET_RPM if a new RPM came with this action command
+        # This is important if a START/REVERSE also carries an RPM.
+        if isinstance(val, list) and len(val) > 1:
+             modbus_slave_handler.set_hreg(REG_TARGET_RPM, target_rpm_val)
+
         try:
             if command_to_process == 1: # START
                 vfd_master.start_motor(target_rpm_val)
@@ -161,20 +193,12 @@ def handle_command_register_write(reg_type, address, val):
         # Acknowledge by resetting the command register VIA THE HANDLER
         # This try-except is for the acknowledgement itself
         try:
-            modbus_slave_handler.set_hreg(REG_CMD, 0) # Use handler to set HREG
-            internal_state['last_written_cmd'] = 0 # Keep internal track if needed
-            print_verbose(f"[DEBUG CB] Command register {REG_CMD} cleared via handler.", 3)
-        except Exception as e:
-            print_verbose(f"[ERROR CB] Failed to clear command reg via handler: {e}", 0)
-    else:
-        # Command 0 written, potentially an acknowledgement clear by master.
-        # print_verbose(f"[DEBUG CB] Command Register cleared (Value=0 received).", 3) # Original print
-        try:
-            modbus_slave_handler.set_hreg(REG_CMD, 0) # Also clear if 0 is written
+            modbus_slave_handler.set_hreg(REG_CMD, 0)
             internal_state['last_written_cmd'] = 0
-            print_verbose(f"[DEBUG CB] Command register {REG_CMD} (val 0) cleared via handler.", 3)
+            print_verbose(f"[DEBUG CB] Action Command {command_to_process}: register {REG_CMD} cleared via handler.", 3)
         except Exception as e:
-            print_verbose(f"[ERROR CB] Failed to clear command reg (val 0) via handler: {e}", 0)
+            print_verbose(f"[ERROR CB] Failed to clear command reg for action {command_to_process}: {e}", 0)
+    # Note: The original 'else' for command_to_process == 0 is now handled by the new 'if command_to_process == 0:' block above.
 
 # --- Assign Callbacks BEFORE Setup ---
 slave_registers['HREGS']['command']['on_set_cb'] = handle_command_register_write
