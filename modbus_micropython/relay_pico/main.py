@@ -69,23 +69,41 @@ def run_master():
 
                 try:
                     # Translate PC command to Modbus Write
+                    # --- !!! START OF MODIFICATION FOR RELAY PICO 'start' COMMAND !!! ---
                     if cmd == "start":
-                        rpm = int(parts[1]) if len(parts) > 1 else 1000
-                        print(f"[MODBUS TX] Writing START command and RPM={rpm}")
-                        time.sleep_ms(20) # Delay before write
-                        modbus_master.write_multiple_registers(MAIN_PICO_SLAVE_ADDR, REG_CMD, [1, rpm])
-                        time.sleep_ms(20) # Delay after write
+                        if len(parts) > 1: # RPM is provided
+                            rpm = int(parts[1])
+                            print(f"[MODBUS TX] Writing START command and RPM={rpm}")
+                            time.sleep_ms(20)
+                            # Send command 1 and the specified RPM
+                            modbus_master.write_multiple_registers(MAIN_PICO_SLAVE_ADDR, REG_CMD, [1, rpm])
+                            time.sleep_ms(20)
+                        else: # No RPM provided with "start"
+                            print(f"[MODBUS TX] Writing START command (using Main Pico's current Target RPM)")
+                            time.sleep_ms(20)
+                            # Send only command 1 to REG_CMD. Main Pico will use its stored REG_TARGET_RPM.
+                            modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_CMD, 1)
+                            time.sleep_ms(20)
+                    # --- !!! END OF MODIFICATION FOR RELAY PICO 'start' COMMAND !!! ---
                     elif cmd == "stop":
                         print(f"[MODBUS TX] Writing STOP command")
                         time.sleep_ms(20) # Delay before write
                         modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_CMD, 2)
                         time.sleep_ms(20) # Delay after write
+                    # --- !!! START OF MODIFICATION FOR RELAY PICO 'reverse' COMMAND (similar to start) !!! ---
                     elif cmd == "reverse":
-                        rpm = int(parts[1]) if len(parts) > 1 else 1000
-                        print(f"[MODBUS TX] Writing REVERSE command and RPM={rpm}")
-                        time.sleep_ms(20) # Delay before write
-                        modbus_master.write_multiple_registers(MAIN_PICO_SLAVE_ADDR, REG_CMD, [3, rpm])
-                        time.sleep_ms(20) # Delay after write
+                        if len(parts) > 1: # RPM is provided
+                            rpm = int(parts[1])
+                            print(f"[MODBUS TX] Writing REVERSE command and RPM={rpm}")
+                            time.sleep_ms(20)
+                            modbus_master.write_multiple_registers(MAIN_PICO_SLAVE_ADDR, REG_CMD, [3, rpm])
+                            time.sleep_ms(20)
+                        else: # No RPM provided with "reverse"
+                            print(f"[MODBUS TX] Writing REVERSE command (using Main Pico's current Target RPM)")
+                            time.sleep_ms(20)
+                            modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_CMD, 3)
+                            time.sleep_ms(20)
+                        # --- !!! END OF MODIFICATION FOR RELAY PICO 'reverse' COMMAND !!! ---
                     elif cmd == "set_speed":
                          if len(parts) > 1:
                             rpm = int(parts[1])
