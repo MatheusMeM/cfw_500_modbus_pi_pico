@@ -83,9 +83,9 @@ def encoder_callback(value, delta, modbus_handler):
     # Print locally if verbosity allows (no rate limit needed for local print)
     if verbose_level >= 1:
         if output_mode == "deg":
-            output = f"Encoder: {degrees:.2f} deg"
+            output = f"Encoder: {report_degrees:.2f} deg" # Changed 'degrees' to 'report_degrees'
         else: # mode == "step"
-            output = f"Encoder: {wrapped_position_steps} steps"
+            output = f"Encoder: {wrapped_report_steps} steps" # Changed 'wrapped_position_steps' to 'wrapped_report_steps'
         # Print level 1 messages only at level 1 or 3 (to avoid clutter at level 2)
         if verbose_level == 1 or verbose_level == 3:
              print_verbose(output, 1) # Print locally
