@@ -42,49 +42,38 @@ def encoder_callback(value, delta, modbus_handler):
     'delta' is the change since the last callback.
     """
     # STEPS_PER_DEGREE is now imported from utils.py
-    # Invert the raw value to correct the direction if necessary
-    # Adjust this based on your wiring and desired positive direction
-    # Adjust this based on your wiring and desired positive direction
-    # For polling logic, ensuring VFD Reverse => encoder_raw_position INCREASES
-    inverted_value = -value
+    inverted_value = -value # Or 'value' depending on desired raw positive direction
     internal_state['encoder_raw_position'] = inverted_value
 
-    # Position relative to the homing switch trigger point
-    position_relative_to_home = inverted_value - internal_state['encoder_zero_offset']
+    # Absolute position relative to Z-pulse (Machine Zero)
+    # After homing, if at Z-pulse, encoder_raw_position ~= encoder_zero_offset, so this is ~0.
+    absolute_steps_from_machine_zero = internal_state['encoder_raw_position'] - internal_state['encoder_zero_offset']
+    internal_state['internal_absolute_degrees'] = absolute_steps_from_machine_zero / STEPS_PER_DEGREE if STEPS_PER_DEGREE != 0 else 0
 
-    # Apply the calibrated offset (in steps) only after homing is complete
-    if not internal_state['homing_completed']:
-        adjusted_position_steps = position_relative_to_home
-    else:
-        # Position relative to the calibrated zero point
-        adjusted_position_steps = position_relative_to_home - internal_state['encoder_offset_steps']
+    # Position relative to User Zero (Calibrated Offset) for Modbus reporting
+    # encoder_offset_steps is the delta from Z-pulse to the User Zero point.
+    steps_from_user_zero = absolute_steps_from_machine_zero - internal_state['encoder_offset_steps']
 
-    # --- Calculate and store continuous absolute degrees ---
-    # This uses the raw position and subtracts both offsets to get steps from true zero
-    absolute_steps_from_true_zero = internal_state['encoder_raw_position'] - \
-                                    internal_state['encoder_zero_offset'] - \
-                                    internal_state['encoder_offset_steps']
-    internal_state['internal_absolute_degrees'] = absolute_steps_from_true_zero / STEPS_PER_DEGREE
-    
+    # MAX_STEPS is ENCODER_RESOLUTION (e.g. 8000 for a 2000PPR encoder)
+    wrapped_report_steps = steps_from_user_zero
+    if MAX_STEPS != 0: # Avoid division by zero if MAX_STEPS is somehow 0
+      wrapped_report_steps = steps_from_user_zero % MAX_STEPS
+      # Ensure positive result for modulo if MAX_STEPS is defined (Python % can be negative)
+      # wrapped_report_steps = (wrapped_report_steps + MAX_STEPS) % MAX_STEPS # Alternative for always positive
+
+    report_degrees = 0.0
+    if MAX_STEPS != 0: # Avoid division by zero
+        report_degrees = (wrapped_report_steps / MAX_STEPS) * 360.0
+        # Ensure degrees are always positive [0, 360)
+        report_degrees = (report_degrees + 360.0) % 360.0
+
+
     if internal_state['VERBOSE_LEVEL'] >= 3:
-        print_verbose(f"[DEBUG ENC_CB] AbsDeg: {internal_state['internal_absolute_degrees']:.2f}", 3)
+        print_verbose(f"[DEBUG ENC_CB] Raw: {internal_state['encoder_raw_position']}, Z_Off: {internal_state['encoder_zero_offset']}, Cal_Off: {internal_state['encoder_offset_steps']}", 3)
+        print_verbose(f"[DEBUG ENC_CB] AbsStepsMachine0: {absolute_steps_from_machine_zero}, AbsDegMachine0: {internal_state['internal_absolute_degrees']:.2f}", 3)
+        print_verbose(f"[DEBUG ENC_CB] StepsUser0: {steps_from_user_zero}, WrappedReportSteps: {wrapped_report_steps}, ReportDeg: {report_degrees:.2f}", 3)
 
-    # --- Optional: Handle Wrapping/Overflow ---
-    # This simple modulo keeps the step count within one revolution range.
-    # The previous dynamic offset adjustment on overflow was removed for clarity.
-    # If multi-turn tracking without wrapping is needed, this logic needs changing.
-    wrapped_position_steps = adjusted_position_steps % MAX_STEPS
-    # Ensure positive result if needed (Python % can be negative)
-    # wrapped_position_steps = (wrapped_position_steps + MAX_STEPS) % MAX_STEPS
-
-    # Calculate degrees from the wrapped step position
-    degrees = (wrapped_position_steps / MAX_STEPS) * 360.0
-    # Ensure degrees are always positive [0, 360)
-    degrees = (degrees + 360) % 360
-
-    # --- Update Modbus Input Registers ---
-    # Update registers with the final calculated values (relative to calibrated zero, potentially wrapped)
-    update_input_registers(modbus_handler, enc_steps=wrapped_position_steps, enc_deg=degrees)
+    update_input_registers(modbus_handler, enc_steps=wrapped_report_steps, enc_deg=report_degrees)
 
     # --- Local Printing based on Verbosity and Mode ---
     # Read mode from internal state (which should reflect Modbus holding register)

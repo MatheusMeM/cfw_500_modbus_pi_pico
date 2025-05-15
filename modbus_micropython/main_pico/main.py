@@ -223,21 +223,24 @@ def handle_command_register_write(reg_type, address, val):
                 print_verbose("[WARNING CB] CALIBRATE command ignored: Homing not completed.", 1)
             else:
                 try:
-                    # Calibrate sets 'encoder_offset_steps' relative to the 'encoder_zero_offset' found by homing.
-                    # The displayed/used position will be: raw_pos - zero_offset - offset_steps
-                    # Or, more simply, if zero_offset is the true machine zero, then
-                    # calibrated_display_pos = (raw_pos - zero_offset) - new_user_offset
-                    # We want to set new_user_offset such that current (raw_pos - zero_offset) becomes the new zero.
-                    # So, new_user_offset = raw_pos - zero_offset
-                    # Use main_encoder_instance.value() for raw hardware steps, then invert if necessary
-                    # Assuming the encoder_callback's inversion logic (-value) is the desired 'raw' for calculations
-                    # For consistency, let's use internal_state['encoder_raw_position'] which is already inverted by the callback
-                    current_pos_relative_to_home = internal_state['encoder_raw_position'] - internal_state['encoder_zero_offset']
-                    internal_state['encoder_offset_steps'] = current_pos_relative_to_home
+                    # 1. Get current raw position (e.g., -7500)
+                    current_raw_pos = internal_state['encoder_raw_position']
+                    
+                    # 2. Get the machine zero reference (e.g., -7984, the raw reading at Z-pulse)
+                    machine_zero_raw_reading = internal_state['encoder_zero_offset']
+                    
+                    # 3. Calculate how many steps the current position is from the Z-pulse (machine zero)
+                    #    steps_from_machine_zero = -7500 - (-7984) = 484
+                    steps_from_machine_zero = current_raw_pos - machine_zero_raw_reading
+                    
+                    # 4. This delta IS the new user calibration offset.
+                    internal_state['encoder_offset_steps'] = steps_from_machine_zero
                     
                     update_input_registers(modbus_slave_handler, offset=internal_state['encoder_offset_steps'])
-                    save_configuration() # Save the new user calibration offset
-                    print_verbose(f"[ACTION CB] Encoder CALIBRATE processed. New user offset relative to home: {internal_state['encoder_offset_steps']}", 0)
+                    save_configuration()
+                    print_verbose(f"[ACTION CB] CALIBRATE: Current raw pos: {current_raw_pos}, Machine Zero (Z-raw): {machine_zero_raw_reading}", 1)
+                    print_verbose(f"[ACTION CB] New User Zero Offset (delta from Z): {internal_state['encoder_offset_steps']} steps.", 0)
+                    print_verbose(f"[ACTION CB] Config saved. Modbus reports will now be zeroed at this current physical position.", 0)
                 except Exception as e:
                     print_verbose(f"[ERROR CB] Error processing CALIBRATE (Cmd 5): {e}", 0)
         else: # STOP (2), RESET_FAULT (4)
@@ -280,175 +283,149 @@ def endstop_triggered_callback_irq(pin):
     # --- End IRQ Handler ---
 
 async def homing(cfw500_master_obj):
-    """
-    Performs the multi-phase homing routine using Z-PIN POLLING.
-    Controls the VFD to move the motor through different stages for reliable detection.
-    This version is wrapped with homing_in_progress_event to prevent re-entry when commanded.
-    """
     if homing_in_progress_event.is_set():
-        print_verbose("[WARNING HOMING CMD] Homing command received, but homing is already in progress. Ignoring.", 1)
+        print_verbose("[WARNING HOMING] Homing command received, but homing is already in progress. Ignoring.", 1)
         return
 
-    homing_in_progress_event.set() # Signal homing has started
-    print_verbose("[INFO HOMING CMD] Starting full multi-phase homing routine (POLLING Z-PIN) via command...", 0)
+    homing_in_progress_event.set()
+    print_verbose("[INFO HOMING] Starting Z-pulse homing routine...", 0)
+    internal_state['homing_completed'] = False
+    update_input_registers(modbus_slave_handler, homing=False) # Signal homing started
 
-    # Store initial homing completed status to see if it changed.
-    # initial_homing_status = internal_state['homing_completed']
+    HOMING_POLL_INTERVAL_MS = 2
+    backup_steps_to_move = int(HOMING_BACKUP_DEGREES * STEPS_PER_DEGREE)
+    z_pulse_detected_this_phase = False # Re-initialize for each phase inside loop if needed, or manage scope
+    initial_motor_start_failed = False
 
     try:
-        # ----- START OF EXISTING homing() function's main logic (adapted) -----
-        internal_state['homing_completed'] = False # Reset at the start of a new attempt
-        update_input_registers(modbus_slave_handler, homing=False)
-        
-        HOMING_POLL_INTERVAL_MS = 2
-        backup_steps_to_move = int(HOMING_BACKUP_DEGREES * STEPS_PER_DEGREE)
-        # z_pulse_detected_this_phase is local to the inner try block of phases
-
-        # Inner try-except-finally for the phases themselves
+        # --- Phase 1: Coarse Search for Z-pulse (Forward) ---
+        print_verbose(f"[HOMING P1] Coarse search forward at {HOMING_SEARCH_RPM} RPM...", 1)
         try:
-            # --- Phase 1: Coarse Search for Z-pulse (Forward) ---
-            print_verbose(f"[HOMING CMD P1] Coarse search forward at {HOMING_SEARCH_RPM} RPM...", 1)
-            if cfw500_master_obj:
-                cfw500_master_obj.start_motor(HOMING_SEARCH_RPM)
-            else:
-                print_verbose("[ERROR HOMING CMD P1] vfd_master is None. Cannot start motor.", 0)
-                raise Exception("VFD master not available for P1 start")
+            cfw500_master_obj.start_motor(HOMING_SEARCH_RPM)
+        except Exception as e:
+            print_verbose(f"[ERROR HOMING P1] Failed to start motor: {e}", 0)
+            initial_motor_start_failed = True
+            # No return here, finally block will handle cleanup
 
+        if not initial_motor_start_failed:
             phase1_start_time_ms = time.ticks_ms()
             last_z_pin_state = zero_pin.value()
-            z_pulse_detected_this_phase_p1 = False
-            print_verbose(f"[HOMING CMD P1] Initial Z-pin state: {last_z_pin_state}. Listening for FALLING edge...", 2)
+            z_pulse_detected_this_phase = False # Reset for this phase
+            print_verbose(f"[HOMING P1] Initial Z-pin: {last_z_pin_state}. Listening for FALLING edge...", 2)
 
-            while time.ticks_diff(time.ticks_ms(), phase1_start_time_ms) < HOMING_TIMEOUT_MS: # Use defined HOMING_TIMEOUT_MS
+            while time.ticks_diff(time.ticks_ms(), phase1_start_time_ms) < HOMING_TIMEOUT_MS:
                 current_z_pin_state = zero_pin.value()
                 if last_z_pin_state == 1 and current_z_pin_state == 0: # Falling edge
-                    print_verbose("[HOMING CMD P1] Z-pulse FALLING edge detected.", 2)
-                    z_pulse_detected_this_phase_p1 = True
+                    print_verbose("[HOMING P1] Z-pulse FALLING edge detected.", 2)
+                    z_pulse_detected_this_phase = True
                     break
                 last_z_pin_state = current_z_pin_state
                 await asyncio.sleep_ms(HOMING_POLL_INTERVAL_MS)
             
-            if cfw500_master_obj: cfw500_master_obj.stop_motor()
-            print_verbose("[HOMING CMD P1] Motor stop command sent. Waiting for settle...", 2)
+            cfw500_master_obj.stop_motor()
+            print_verbose("[HOMING P1] Motor stop. Settling...", 2)
             await asyncio.sleep_ms(SETTLE_TIME_MS)
 
-            if not z_pulse_detected_this_phase_p1:
-                print_verbose("[ERROR HOMING CMD P1] Timeout or failure: Z-pulse not detected in coarse search.", 0)
-                internal_state['homing_completed'] = False # Ensure this is set before returning from phases
-                update_input_registers(modbus_slave_handler, homing=False)
-                return # Exit from phases early, outer finally will clear event
+            if not z_pulse_detected_this_phase:
+                print_verbose("[ERROR HOMING P1] Timeout: Z-pulse not found in coarse search.", 0)
+                raise Exception("Homing P1 Timeout")
+
+        if initial_motor_start_failed:
+            raise Exception("Homing P1 Motor Start Failed")
+
+        # --- Phase 2: Backup Past Z-Pulse (Reverse) ---
+        print_verbose(f"[HOMING P2] Backing up {HOMING_BACKUP_DEGREES} deg at {HOMING_CREEP_RPM} RPM...", 1)
+        start_backup_pos_raw = internal_state['encoder_raw_position']
+        print_verbose(f"[DEBUG HOMING P2] StartRaw for backup: {start_backup_pos_raw}", 3)
+        
+        try:
+            cfw500_master_obj.reverse_motor(HOMING_CREEP_RPM)
+        except Exception as e:
+            print_verbose(f"[ERROR HOMING P2] Failed to start motor for backup: {e}", 0)
+            raise Exception("Homing P2 Motor Start Failed")
+
+        backup_loop_start_time = time.ticks_ms()
+        moved_backup_steps = 0
+        while moved_backup_steps < backup_steps_to_move:
+            current_raw_pos = internal_state['encoder_raw_position']
+            # Corrected direction for reverse based on typical encoder behavior where
+            # forward increments raw value, reverse decrements raw value.
+            # If encoder_raw_position is already inverted (-value), then VFD Reverse (motor physically reverses)
+            # would make the non-inverted 'value' decrease, so inverted 'encoder_raw_position' would INCREASE.
+            # If VFD Reverse makes encoder_raw_position DECREASE:
+            # moved_backup_steps = start_backup_pos_raw - current_raw_pos
+            # If VFD Reverse makes encoder_raw_position INCREASE:
+            moved_backup_steps = current_raw_pos - start_backup_pos_raw
             
-            print_verbose("[HOMING CMD P1] Phase 1 complete (Z-pulse found and motor stopped).", 1)
+            if internal_state['VERBOSE_LEVEL'] >= 3:
+                print_verbose(f"[DEBUG HOMING P2] CurrRaw: {current_raw_pos}, Moved: {moved_backup_steps}, Target: {backup_steps_to_move}", 3)
 
-            # --- Phase 2: Backup Past Z-Pulse (Reverse) ---
-            print_verbose(f"[HOMING CMD P2] Backing up {HOMING_BACKUP_DEGREES} degrees at {HOMING_CREEP_RPM} RPM...", 1)
-            # Use internal_state['encoder_raw_position'] which is updated by the encoder_callback
-            start_backup_pos_raw = internal_state['encoder_raw_position']
-            print_verbose(f"[DEBUG HOMING CMD P2] StartRaw for backup: {start_backup_pos_raw}", 3)
-            if cfw500_master_obj:
-                cfw500_master_obj.reverse_motor(HOMING_CREEP_RPM)
-            else:
-                print_verbose("[ERROR HOMING CMD P2] vfd_master is None. Cannot reverse motor.", 0)
-                raise Exception("VFD master not available for P2 reverse")
+            if time.ticks_diff(time.ticks_ms(), backup_loop_start_time) > HOMING_BACKUP_DURATION_MS:
+                print_verbose("[ERROR HOMING P2] Timeout during backup.", 0)
+                cfw500_master_obj.stop_motor()
+                raise Exception("Homing P2 Backup Timeout")
+            await asyncio.sleep_ms(20)
 
+        cfw500_master_obj.stop_motor()
+        print_verbose("[HOMING P2] Backup complete. Settling...", 2)
+        await asyncio.sleep_ms(SETTLE_TIME_MS)
 
-            backup_loop_start_time = time.ticks_ms()
-            moved_backup_steps = 0
-            while moved_backup_steps < backup_steps_to_move:
-                # Use internal_state['encoder_raw_position']
-                current_raw_pos = internal_state['encoder_raw_position']
-                moved_backup_steps = current_raw_pos - start_backup_pos_raw # Assuming increasing for reverse
+        # --- Phase 3: Slow Forward Approach to Z-Pulse (Polling) ---
+        print_verbose(f"[HOMING P3] Slow forward approach at {HOMING_CREEP_RPM} RPM...", 1)
+        try:
+            cfw500_master_obj.start_motor(HOMING_CREEP_RPM)
+        except Exception as e:
+            print_verbose(f"[ERROR HOMING P3] Failed to start motor for final approach: {e}", 0)
+            raise Exception("Homing P3 Motor Start Failed")
+
+        phase3_start_time_ms = time.ticks_ms()
+        last_z_pin_state = zero_pin.value()
+        z_pulse_detected_this_phase = False # Reset for this phase
+        print_verbose(f"[HOMING P3] Initial Z-pin: {last_z_pin_state}. Listening for FALLING edge...", 2)
+
+        raw_reading_at_z = 0
+
+        while time.ticks_diff(time.ticks_ms(), phase3_start_time_ms) < HOMING_TIMEOUT_MS:
+            current_z_pin_state = zero_pin.value()
+            if last_z_pin_state == 1 and current_z_pin_state == 0: # Falling edge
+                raw_reading_at_z = internal_state['encoder_raw_position']
+                cfw500_master_obj.stop_motor()
                 
-                if internal_state['VERBOSE_LEVEL'] >= 3:
-                    print_verbose(f"[DEBUG HOMING CMD P2] CurrRaw: {current_raw_pos}, MovedSteps: {moved_backup_steps}, TargetSteps: {backup_steps_to_move}", 3)
+                internal_state['encoder_zero_offset'] = raw_reading_at_z
+                internal_state['homing_completed'] = True
+                update_input_registers(modbus_slave_handler, homing=True)
+                print_verbose(f"[INFO HOMING] Z-pulse found! Machine Zero established.", 0)
+                print_verbose(f"[INFO HOMING] Raw encoder reading at Z-pulse was: {raw_reading_at_z}", 1)
+                print_verbose(f"[INFO HOMING] 'encoder_zero_offset' set to: {internal_state['encoder_zero_offset']}", 1)
+                z_pulse_detected_this_phase = True
+                break
+            last_z_pin_state = current_z_pin_state
+            await asyncio.sleep_ms(HOMING_POLL_INTERVAL_MS)
 
-                if time.ticks_diff(time.ticks_ms(), backup_loop_start_time) > HOMING_BACKUP_DURATION_MS: # Use defined timeout
-                    print_verbose("[ERROR HOMING CMD P2] Timeout during backup movement.", 0)
-                    if cfw500_master_obj: cfw500_master_obj.stop_motor()
-                    internal_state['homing_completed'] = False
-                    update_input_registers(modbus_slave_handler, homing=False)
-                    return
-                await asyncio.sleep_ms(20)
+        if not z_pulse_detected_this_phase:
+            cfw500_master_obj.stop_motor()
+            print_verbose("[ERROR HOMING P3] Timeout: Z-pulse not detected in final approach.", 0)
+            raise Exception("Homing P3 Timeout")
 
-            if cfw500_master_obj: cfw500_master_obj.stop_motor()
-            print_verbose("[HOMING CMD P2] Backup complete. Waiting for motor to settle...", 2)
-            await asyncio.sleep_ms(SETTLE_TIME_MS)
+        print_verbose("[HOMING P3] Z-pulse detected & motor stopped. Settling...", 2)
+        await asyncio.sleep_ms(SETTLE_TIME_MS)
+        print_verbose("[INFO HOMING] Homing routine successful.", 0)
 
-            # --- Phase 3: Slow Forward Approach to Z-Pulse (Polling) ---
-            print_verbose(f"[HOMING CMD P3] Slow forward approach at {HOMING_CREEP_RPM} RPM...", 1)
-            if cfw500_master_obj:
-                cfw500_master_obj.start_motor(HOMING_CREEP_RPM)
-            else:
-                print_verbose("[ERROR HOMING CMD P3] vfd_master is None. Cannot start motor for P3.", 0)
-                raise Exception("VFD master not available for P3 start")
-
-            phase3_start_time_ms = time.ticks_ms()
-            last_z_pin_state = zero_pin.value()
-            z_pulse_detected_this_phase_p3 = False
-            print_verbose(f"[HOMING CMD P3] Initial Z-pin state: {last_z_pin_state}. Listening for FALLING edge...", 2)
-
-            while time.ticks_diff(time.ticks_ms(), phase3_start_time_ms) < HOMING_TIMEOUT_MS: # Use defined timeout
-                current_z_pin_state = zero_pin.value()
-                if last_z_pin_state == 1 and current_z_pin_state == 0:
-                    if cfw500_master_obj: cfw500_master_obj.stop_motor()
-                    # Use internal_state['encoder_raw_position']
-                    internal_state['encoder_zero_offset'] = internal_state['encoder_raw_position']
-                    internal_state['homing_completed'] = True
-                    update_input_registers(modbus_slave_handler, homing=True) # Only update homing flag
-                    print_verbose(f"[INFO HOMING CMD P3] Homing complete (POLLING). Encoder zero offset captured at raw steps: {internal_state['encoder_zero_offset']}", 0)
-                    z_pulse_detected_this_phase_p3 = True
-                    break
-                last_z_pin_state = current_z_pin_state
-                await asyncio.sleep_ms(HOMING_POLL_INTERVAL_MS)
-
-            if not z_pulse_detected_this_phase_p3:
-                if cfw500_master_obj: cfw500_master_obj.stop_motor()
-                print_verbose("[ERROR HOMING CMD P3] Timeout or failure: Z-pulse not detected in final approach.", 0)
-                internal_state['homing_completed'] = False
-                update_input_registers(modbus_slave_handler, homing=False)
-                return
-
-            print_verbose("[HOMING CMD P3] Z-pulse detected & motor stopped. Waiting for settle...", 2)
-            await asyncio.sleep_ms(SETTLE_TIME_MS)
-
-        except Exception as e_inner:
-            print_verbose(f"[ERROR HOMING CMD PHASES] An unexpected error in phases: {e_inner}", 0)
-            if cfw500_master_obj: cfw500_master_obj.stop_motor()
-            internal_state['homing_completed'] = False
-            update_input_registers(modbus_slave_handler, homing=False)
-            # This exception will be caught by the outer try/except if not returned
-
-        finally: # Inner finally for phases
-            # This ensures motor is stopped if any phase failed and returned early, or if an exception occurred within phases.
-            if not internal_state['homing_completed']:
-                print_verbose("[HOMING CMD PHASES] Ensuring motor is stopped after incomplete/failed attempt in phases.", 1)
-                if cfw500_master_obj:
-                    cfw500_master_obj.stop_motor()
-                    await asyncio.sleep_ms(SETTLE_TIME_MS)
-            print_verbose(f"[DEBUG HOMING CMD PHASES] Homing phases finished. Status: {internal_state['homing_completed']}", 3)
-        # ----- END OF ADAPTED existing homing() function's main logic -----
-
-        # Report final status based on what happened in the phases
-        if internal_state['homing_completed']:
-            print_verbose(f"[INFO HOMING CMD] Homing via command successful. Raw Z-offset: {internal_state['encoder_zero_offset']}", 0)
-        else:
-            print_verbose(f"[ERROR HOMING CMD] Homing via command failed or was incomplete. Final Status: {internal_state['homing_completed']}", 0)
-
-    except Exception as e_outer:
-        print_verbose(f"[ERROR HOMING CMD WRAPPER] An unexpected error during commanded homing: {e_outer}", 0)
+    except Exception as e:
+        print_verbose(f"[ERROR HOMING] Homing routine failed: {e}", 0)
         internal_state['homing_completed'] = False
         update_input_registers(modbus_slave_handler, homing=False)
-    finally: # Outer finally for the event and overall cleanup
-        homing_in_progress_event.clear()
-        
-        if not internal_state['homing_completed']:
-            print_verbose("[HOMING CMD WRAPPER] Ensuring motor is stopped after incomplete/failed commanded homing (overall).", 1)
-            if cfw500_master_obj:
+        try:
+            if cfw500_master_obj: # Ensure cfw500_master_obj is not None
                 cfw500_master_obj.stop_motor()
+                print_verbose("[SAFETY HOMING] Ensured motor is stopped after homing failure.", 1)
                 await asyncio.sleep_ms(SETTLE_TIME_MS)
-            else:
-                print_verbose("[ERROR HOMING CMD WRAPPER] cfw500_master_obj is None in outer finally. Cannot stop motor.", 0)
-        print_verbose(f"[DEBUG HOMING CMD WRAPPER] Commanded homing finished. Overall Status: {internal_state['homing_completed']}", 3)
+        except Exception as stop_e:
+            print_verbose(f"[ERROR HOMING] Failed to stop motor during error cleanup: {stop_e}", 0)
+            
+    finally:
+        homing_in_progress_event.clear()
+        print_verbose(f"[DEBUG HOMING] Homing routine finished. Homing completed status: {internal_state['homing_completed']}", 3)
 
 
 # --- Background Tasks ---
@@ -635,9 +612,14 @@ async def main():
     #     await asyncio.sleep_ms(100) # Allow cancellations
     # except asyncio.CancelledError: pass
     # print_verbose("[DEBUG] Background tasks cancelled.", 3)
-    
-    await homing(vfd_master) # <<< RE-ENABLED FOR STARTUP HOMING
-    print_verbose("[INFO] Startup Homing Sequence automatically called.", 0)
+
+    # --- Attempt Homing on Startup ---
+    print_verbose("[INFO] Attempting homing on startup...", 0)
+    await homing(vfd_master) # This will set internal_state['encoder_zero_offset']
+    if internal_state['homing_completed']:
+        print_verbose("[INFO] Homing on startup successful.", 1)
+    else:
+        print_verbose("[WARNING] Homing on startup failed or was skipped.", 1)
     
     # # Restart background tasks - Kept disabled for now
     # print_verbose("[DEBUG] Restarting background tasks after homing...", 3)
