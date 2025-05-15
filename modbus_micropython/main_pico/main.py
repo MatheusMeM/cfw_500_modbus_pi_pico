@@ -50,8 +50,8 @@ MAIN_LOOP_SLEEP_MS = 20 # Main loop sleep
 SETTLE_TIME_MS = 3500        # Time for motor to settle after VFD stop command
 
 # --- Homing Parameters ---
-HOMING_SEARCH_RPM = 800      # RPM for the initial search for the Z-pulse
-HOMING_CREEP_RPM = 600       # RPM for the slow final approach to the Z-pulse
+HOMING_SEARCH_RPM = 750      # RPM for the initial search for the Z-pulse
+HOMING_CREEP_RPM = 400       # RPM for the slow final approach to the Z-pulse
 HOMING_BACKUP_DEGREES = 20.0 # Degrees to back up past Z-pulse after initial find
 
 # --- Hardware Initialization ---
@@ -260,7 +260,7 @@ async def homing(cfw500_master_obj):
         z_pulse_detected_this_phase = False
         print_verbose(f"[HOMING POLLING P1] Initial Z-pin state: {last_z_pin_state}. Listening for FALLING edge...", 2)
 
-        while time.ticks_diff(time.ticks_ms(), phase1_start_time_ms) < 60000: # 60s timeout
+        while time.ticks_diff(time.ticks_ms(), phase1_start_time_ms) < 90000: # 90s timeout
             current_z_pin_state = zero_pin.value()
             if last_z_pin_state == 1 and current_z_pin_state == 0: # Falling edge
                 print_verbose("[HOMING POLLING P1] Z-pulse FALLING edge detected.", 2)
