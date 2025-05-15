@@ -124,6 +124,11 @@ def run_master():
                         time.sleep_ms(20) # Delay before write
                         modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_CMD, 5)
                         time.sleep_ms(20) # Delay after write
+                    elif cmd == "home":
+                        print(f"[MODBUS TX] Writing HOME command")
+                        time.sleep_ms(20) # Delay before write
+                        modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_CMD, 6) # Home is 6
+                        time.sleep_ms(20) # Delay after write
                     elif cmd == "set_verbose":
                         if len(parts) > 1:
                             level = int(parts[1])
@@ -158,7 +163,7 @@ def run_master():
                              print("--- Relay Pico Help ---")
                              print("Commands are sent to Main Pico via Modbus.")
                              print("Status (speed, VFD status, encoder) is read periodically.")
-                             print("Available commands to send: start [rpm], stop, reverse [rpm], set_speed [rpm], reset_fault, calibrate, set_verbose [0-3], set_encoder_output [step|deg]")
+                             print("Available commands to send: start [rpm], stop, reverse [rpm], set_speed [rpm], reset_fault, calibrate, home, set_verbose [0-3], set_encoder_output [step|deg]") # Added 'home'
                     else:
                         print(f"[ERROR] Unknown command: {cmd}")
 

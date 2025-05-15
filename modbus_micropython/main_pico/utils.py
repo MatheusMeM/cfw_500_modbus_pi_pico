@@ -17,7 +17,7 @@ STEPS_PER_DEGREE = MAX_STEPS / MAX_DEGREES if MAX_DEGREES > 0 else 0 # Avoid div
 
 # Modbus Register Definitions (Slave Map for Network 1 - Relay Master)
 # Holding Registers (Writeable by Relay Master)
-REG_CMD = 100         # Command Register (1=START, 2=STOP, 3=REVERSE, 4=RESET_FAULT, 5=CALIBRATE, 0=No Action)
+REG_CMD = 100         # Command Register (1=START, 2=STOP, 3=REVERSE, 4=RESET_FAULT, 5=CALIBRATE, 6=HOME, 0=No Action)
 REG_TARGET_RPM = 101  # Target RPM for START/REVERSE/SET_SPEED
 REG_VERBOSE = 102     # Verbosity Level (0-3) for local printing
 REG_ENC_MODE = 103    # Encoder Output Mode (0=steps, 1=degrees)
