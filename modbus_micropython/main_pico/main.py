@@ -381,7 +381,8 @@ async def vfd_status_request_task(cfw500_master_obj): # Pass VFD master object
                 update_input_registers(modbus_slave_handler, fault=fault) # Pass handler
                 # ADD DEBUG PRINT HERE
                 if internal_state['VERBOSE_LEVEL'] >= 3:
-                     print_verbose(f"[DEBUG VFD TASK] After fault update: FAULT_REG={modbus_slave_handler.get_ireg(REG_FAULT_FLAG)}", 3) # Use get_ireg
+                     # print_verbose(f"[DEBUG VFD TASK] After fault update: FAULT_REG={modbus_slave_handler.get_ireg(REG_FAULT_FLAG)}", 3) # Use get_ireg
+                     pass # Added pass to avoid indentation error
                 if fault and internal_state['VERBOSE_LEVEL'] >= 1:
                      print_verbose("[ALERT] VFD Fault Detected!", 1)
             else:
@@ -391,9 +392,11 @@ async def vfd_status_request_task(cfw500_master_obj): # Pass VFD master object
                  update_input_registers(modbus_slave_handler, vfd_status=status_p0680) # Pass handler
                  # ADD DEBUG PRINT HERE
                  if internal_state['VERBOSE_LEVEL'] >= 3:
-                      print_verbose(f"[DEBUG VFD TASK] After VFD status update: VFD_STATUS_REG={modbus_slave_handler.get_ireg(REG_VFD_STATUS)}", 3) # Use get_ireg
+                      # print_verbose(f"[DEBUG VFD TASK] After VFD status update: VFD_STATUS_REG={modbus_slave_handler.get_ireg(REG_VFD_STATUS)}", 3) # Use get_ireg
+                      pass # Added pass to avoid indentation error
                  if internal_state['VERBOSE_LEVEL'] >= 3: # Keep existing P0680 print
-                      print_verbose(f"[DEBUG] VFD Status P0680: 0x{status_p0680:04X}", 3)
+                      # print_verbose(f"[DEBUG] VFD Status P0680: 0x{status_p0680:04X}", 3)
+                      pass # Added pass to avoid indentation error
             else:
                  print_verbose("[WARNING] Failed to read VFD status P0680.", 1)
 
@@ -448,7 +451,8 @@ async def modbus_slave_poll_task(modbus_handler_obj): # Pass Modbus handler obje
                     offset_val_before = modbus_handler_obj.get_ireg(REG_OFFSET_STEPS)
                     max_rpm_val_before = modbus_handler_obj.get_ireg(REG_MAX_RPM)
                     vfd_status_val_before = modbus_handler_obj.get_ireg(REG_VFD_STATUS)
-                    print_verbose(f"[DEBUG SLAVE POLL] BEFORE process(): RPM={rpm_val_before}, OFFSET={offset_val_before}, MAX_RPM={max_rpm_val_before}, VFD_STAT={vfd_status_val_before:#06x}", 3)
+                    # print_verbose(f"[DEBUG SLAVE POLL] BEFORE process(): RPM={rpm_val_before}, OFFSET={offset_val_before}, MAX_RPM={max_rpm_val_before}, VFD_STAT={vfd_status_val_before:#06x}", 3)
+                    pass # Added pass to avoid indentation error
 
             result = modbus_handler_obj.process()
 
