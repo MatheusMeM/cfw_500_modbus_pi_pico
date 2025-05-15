@@ -34,15 +34,14 @@ slave_registers = {
         'encoder_mode':     {'register': REG_ENC_MODE,     'val': 1}, # Default 'deg'
     },
     'IREGS': { # Input Registers (Readable by Relay Master)
-        # --- !!! START OF CHANGE: Add non-zero initial test values !!! ---
-        'current_rpm':      {'register': REG_CURRENT_RPM,  'val': 123},    # Test value 12.3 RPM (123 / 10.0)
-        'vfd_status':       {'register': REG_VFD_STATUS,   'val': 0xABCD}, # Test status
-        'encoder_steps':    {'register': REG_ENC_POS_STEPS,'val': 4567},    # Test steps
-        'encoder_degrees':  {'register': REG_ENC_POS_DEG,  'val': 8912},    # Test degrees 89.12 (8912 / 100.0)
-        'fault_flag':       {'register': REG_FAULT_FLAG,   'val': 0},       # Test fault = True
-        'homing_flag':      {'register': REG_HOMING_FLAG,  'val': 0},       # Test homing = True
-        'offset_steps':     {'register': REG_OFFSET_STEPS, 'val': 99},      # Test offset
-        'max_rpm':          {'register': REG_MAX_RPM,      'val': 1750},    # Test max RPM
+        'current_rpm':      {'register': REG_CURRENT_RPM,  'val': 0},  
+        'vfd_status':       {'register': REG_VFD_STATUS,   'val': 0xABCD}, 
+        'encoder_steps':    {'register': REG_ENC_POS_STEPS,'val': 0},   
+        'encoder_degrees':  {'register': REG_ENC_POS_DEG,  'val': 0}, 
+        'fault_flag':       {'register': REG_FAULT_FLAG,   'val': 0},      
+        'homing_flag':      {'register': REG_HOMING_FLAG,  'val': 0},       
+        'offset_steps':     {'register': REG_OFFSET_STEPS, 'val': 500},     
+        'max_rpm':          {'register': REG_MAX_RPM,      'val': 1700},
         # --- !!! END OF CHANGE !!! ---
     },
     'COILS': {}, # Not used currently
