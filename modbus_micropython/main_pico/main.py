@@ -5,7 +5,7 @@ import sys
 import uasyncio as asyncio
 from machine import Pin, UART
 from cfw500_modbus import CFW500Modbus # Import class directly
-from encoder_module import initialize_encoder, get_raw_position # Added get_raw_position
+from encoder_module import initialize_encoder # Removed get_raw_position
 from command_processor import process_modbus_commands # Import the new processor
 from utils import (
     print_verbose, show_manual, load_configuration, save_configuration,
@@ -91,6 +91,8 @@ vfd_master = CFW500Modbus( # Instantiate the VFD control class
 )
 print_verbose("[INFO] Modbus Master (UART0 for VFD) initialized.", 2)
 
+# Global for encoder instance
+main_encoder_instance = None
 
 # --- Modbus Register Callbacks ---
 # Define the callback function BEFORE it's assigned
@@ -227,7 +229,10 @@ def handle_command_register_write(reg_type, address, val):
                     # calibrated_display_pos = (raw_pos - zero_offset) - new_user_offset
                     # We want to set new_user_offset such that current (raw_pos - zero_offset) becomes the new zero.
                     # So, new_user_offset = raw_pos - zero_offset
-                    current_pos_relative_to_home = get_raw_position() - internal_state['encoder_zero_offset']
+                    # Use main_encoder_instance.value() for raw hardware steps, then invert if necessary
+                    # Assuming the encoder_callback's inversion logic (-value) is the desired 'raw' for calculations
+                    # For consistency, let's use internal_state['encoder_raw_position'] which is already inverted by the callback
+                    current_pos_relative_to_home = internal_state['encoder_raw_position'] - internal_state['encoder_zero_offset']
                     internal_state['encoder_offset_steps'] = current_pos_relative_to_home
                     
                     update_input_registers(modbus_slave_handler, offset=internal_state['encoder_offset_steps'])
@@ -337,7 +342,8 @@ async def homing(cfw500_master_obj):
 
             # --- Phase 2: Backup Past Z-Pulse (Reverse) ---
             print_verbose(f"[HOMING CMD P2] Backing up {HOMING_BACKUP_DEGREES} degrees at {HOMING_CREEP_RPM} RPM...", 1)
-            start_backup_pos_raw = get_raw_position() # Use imported get_raw_position
+            # Use internal_state['encoder_raw_position'] which is updated by the encoder_callback
+            start_backup_pos_raw = internal_state['encoder_raw_position']
             print_verbose(f"[DEBUG HOMING CMD P2] StartRaw for backup: {start_backup_pos_raw}", 3)
             if cfw500_master_obj:
                 cfw500_master_obj.reverse_motor(HOMING_CREEP_RPM)
@@ -349,7 +355,8 @@ async def homing(cfw500_master_obj):
             backup_loop_start_time = time.ticks_ms()
             moved_backup_steps = 0
             while moved_backup_steps < backup_steps_to_move:
-                current_raw_pos = get_raw_position()
+                # Use internal_state['encoder_raw_position']
+                current_raw_pos = internal_state['encoder_raw_position']
                 moved_backup_steps = current_raw_pos - start_backup_pos_raw # Assuming increasing for reverse
                 
                 if internal_state['VERBOSE_LEVEL'] >= 3:
@@ -384,7 +391,8 @@ async def homing(cfw500_master_obj):
                 current_z_pin_state = zero_pin.value()
                 if last_z_pin_state == 1 and current_z_pin_state == 0:
                     if cfw500_master_obj: cfw500_master_obj.stop_motor()
-                    internal_state['encoder_zero_offset'] = get_raw_position()
+                    # Use internal_state['encoder_raw_position']
+                    internal_state['encoder_zero_offset'] = internal_state['encoder_raw_position']
                     internal_state['homing_completed'] = True
                     update_input_registers(modbus_slave_handler, homing=True) # Only update homing flag
                     print_verbose(f"[INFO HOMING CMD P3] Homing complete (POLLING). Encoder zero offset captured at raw steps: {internal_state['encoder_zero_offset']}", 0)
@@ -573,7 +581,8 @@ async def main():
 
     # Initialize Encoder (uses internal_state, updates slave_registers via callback)
     # modbus_slave_handler is initialized earlier in main.py
-    initialize_encoder(16, 17, modbus_slave_handler)
+    global main_encoder_instance
+    main_encoder_instance = initialize_encoder(16, 17, modbus_slave_handler)
     print_verbose("[INFO] Encoder ENABLED.", 0)
 
     # --- Safety Stop ---
