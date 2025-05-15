@@ -359,7 +359,8 @@ async def homing(cfw500_master_obj):
     update_input_registers(modbus_slave_handler, homing=False) # Signal homing started
 
     HOMING_POLL_INTERVAL_MS = 2
-    backup_steps_to_move = int(HOMING_BACKUP_DEGREES * STEPS_PER_DEGREE)
+    # We no longer need backup_steps_to_move since we're using absolute degrees for Phase 2 control
+    # backup_steps_to_move = int(HOMING_BACKUP_DEGREES * STEPS_PER_DEGREE)
     z_pulse_detected_this_phase = False # Re-initialize for each phase inside loop if needed, or manage scope
     initial_motor_start_failed = False
 
@@ -400,31 +401,28 @@ async def homing(cfw500_master_obj):
             raise Exception("Homing P1 Motor Start Failed")
 
         # --- Phase 2: Backup Past Z-Pulse (Reverse) ---
-        print_verbose(f"[HOMING P2] Backing up {HOMING_BACKUP_DEGREES} deg at {HOMING_CREEP_RPM} RPM...", 1)
-        start_backup_pos_raw = internal_state['encoder_raw_position']
-        print_verbose(f"[DEBUG HOMING P2] StartRaw for backup: {start_backup_pos_raw}", 3)
+        print_verbose(f"[HOMING P2] Backing up {HOMING_BACKUP_DEGREES} deg at {HOMING_CREEP_RPM} RPM using absolute degrees...", 1)
+        
+        # Use internal_absolute_degrees for Phase 2 backup control
+        start_backup_abs_deg = internal_state['internal_absolute_degrees']
+        target_backup_abs_deg = start_backup_abs_deg + HOMING_BACKUP_DEGREES # VFD Reverse INCREASES absolute degrees
+        
+        print_verbose(f"[DEBUG HOMING P2] Start abs_deg for backup: {start_backup_abs_deg:.2f}°, Target abs_deg: {target_backup_abs_deg:.2f}°", 3)
         
         try:
-            cfw500_master_obj.reverse_motor(HOMING_CREEP_RPM)
+            cfw500_master_obj.reverse_motor(HOMING_CREEP_RPM) # This causes internal_absolute_degrees to INCREASE
         except Exception as e:
             print_verbose(f"[ERROR HOMING P2] Failed to start motor for backup: {e}", 0)
             raise Exception("Homing P2 Motor Start Failed")
 
         backup_loop_start_time = time.ticks_ms()
-        moved_backup_steps = 0
-        while moved_backup_steps < backup_steps_to_move:
-            current_raw_pos = internal_state['encoder_raw_position']
-            # Corrected direction for reverse based on typical encoder behavior where
-            # forward increments raw value, reverse decrements raw value.
-            # If encoder_raw_position is already inverted (-value), then VFD Reverse (motor physically reverses)
-            # would make the non-inverted 'value' decrease, so inverted 'encoder_raw_position' would INCREASE.
-            # If VFD Reverse makes encoder_raw_position DECREASE:
-            # moved_backup_steps = start_backup_pos_raw - current_raw_pos
-            # If VFD Reverse makes encoder_raw_position INCREASE:
-            moved_backup_steps = current_raw_pos - start_backup_pos_raw
+        
+        # Change loop condition for Phase 2 to use absolute degrees
+        while internal_state['internal_absolute_degrees'] < target_backup_abs_deg:
+            current_abs_deg_p2 = internal_state['internal_absolute_degrees'] # For logging
             
             if internal_state['VERBOSE_LEVEL'] >= 3:
-                print_verbose(f"[DEBUG HOMING P2] CurrRaw: {current_raw_pos}, Moved: {moved_backup_steps}, Target: {backup_steps_to_move}", 3)
+                print_verbose(f"[DEBUG HOMING P2] Current abs_deg: {current_abs_deg_p2:.2f}°, Target abs_deg: {target_backup_abs_deg:.2f}°", 3)
 
             if time.ticks_diff(time.ticks_ms(), backup_loop_start_time) > HOMING_BACKUP_DURATION_MS:
                 print_verbose("[ERROR HOMING P2] Timeout during backup.", 0)
