@@ -45,6 +45,9 @@ This project implements a system for controlling a Variable Frequency Drive (VFD
     -   Dynamic speed changes for a running motor via the `set_speed` command.
     -   Reading motor speed (RPM) and VFD status/faults.
     -   Resetting VFD faults.
+    -   Precise positioning with the `rotate` command (always moves in VFD physical FORWARD direction).
+    -   Automatic return to calibrated position after homing.
+    -   Manual return to calibrated position with `go_to_calib` command.
 -   **Quadrature Encoder Integration:**
     -   Reads encoder for position in steps/degrees. Supports zero-calibration (`calibrate` command storing offset in `config.json`). Homing routine using Z-signal endstop (to be fully tested).
 -   **Command Handling (Main Pico):**
@@ -129,7 +132,7 @@ This project implements a system for controlling a Variable Frequency Drive (VFD
 
 | Address | Name              | Description                                                              | Default | Handled By        |
 |---------|-------------------|--------------------------------------------------------------------------|---------|-------------------|
-| 100     | `command`         | 1=Start, 2=Stop, 3=Reverse, 4=Reset Fault, 5=Calibrate. Command 0 is used with REG_TARGET_RPM for set_speed functionality. | 0       | Callback (`main.py`) |
+| 100     | `command`         | 1=Start, 2=Stop, 3=Reverse, 4=Reset Fault, 5=Calibrate, 6=Home, 7=Rotate, 8=Go_To_Calibrated_Position. Command 0 is used with REG_TARGET_RPM for set_speed functionality. | 0       | Callback (`main.py`) |
 | 101     | `target_rpm`      | Target RPM for Start/Reverse/Set_Speed commands. Used by set_speed (cmd 0), or by start/reverse (cmd 1 or 3) if no RPM is explicitly sent with those commands. | 0       | Callback (`main.py`) |
 | 102     | `verbosity_level` | Verbosity level for Main Pico local prints (0-3)                         | 1       | Polling (`command_processor.py`) |
 | 103     | `encoder_mode`    | Encoder output mode (0=steps, 1=degrees)                                 | 1       | Polling (`command_processor.py`) |
@@ -179,11 +182,14 @@ This project implements a system for controlling a Variable Frequency Drive (VFD
     - If `[rpm]` is provided, it sets that as the target. If `[rpm]` is omitted, Main Pico uses current `REG_TARGET_RPM`. Writes HReg 100=3. If `[rpm]` is provided, also writes rpm to HReg 101.
 -   `set_speed [rpm]`: Updates the motor's target speed to `[rpm]`. If the motor is running, its speed will change. If stopped, this sets the speed for the next parameter-less start/reverse command. Writes HReg 100=0 and rpm to HReg 101.
 -   `reset_fault`: Attempt VFD fault reset. Writes HReg 100=4.
--   `calibrate`: Set current encoder position as zero offset. Writes HReg 100=5.
+-   `calibrate`: Set current encoder position as zero offset. Writes HReg 100=5. Only works after successful homing.
+-   `home`: Run the homing sequence to find Z-pulse reference. Writes HReg 100=6. After successful homing, the system will automatically move to the calibrated position.
+-   `rotate [angle]`: Rotate the motor by the specified angle in degrees. Writes HReg 100=7 and the angle to HReg 101. Always moves in VFD physical FORWARD direction regardless of angle sign.
+-   `go_to_calib`: Move to the calibrated position (where encoder value is zero). Writes HReg 100=8.
 -   `set_verbose [0-3]`: Set Main Pico local print level. Writes HReg 102=level.
 -   `set_encoder_output [step|deg]`: Set encoder reporting mode. Writes HReg 103=(0 or 1).
 -   `status`: (Local Relay command) Prints last read status from Main Pico Input Registers.
--   `help`: (Local Relay command) Show command list.
+-   `help`: (Local Relay command) Show structured command list with categories and descriptions.
 
 ## Troubleshooting (General)
 

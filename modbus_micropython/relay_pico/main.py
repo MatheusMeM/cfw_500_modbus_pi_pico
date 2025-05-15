@@ -17,7 +17,7 @@ RS485_DE_RE_PIN_NUM = 2 # GPIO2
 
 # Modbus Register Definitions (Matching Main Pico Slave Map)
 # Holding Registers (Write to Main)
-REG_CMD = 100         # Command Register (1=START, 2=STOP, 3=REVERSE, 4=RESET_FAULT, 5=CALIBRATE)
+REG_CMD = 100         # Command Register (1=START, 2=STOP, 3=REVERSE, 4=RESET_FAULT, 5=CALIBRATE, 6=HOME, 7=ROTATE, 8=GO_TO_CALIBRATED_POSITION)
 REG_TARGET_RPM = 101  # Target RPM
 REG_VERBOSE = 102     # Verbosity Level (0-3)
 REG_ENC_MODE = 103    # Encoder Output Mode (0=steps, 1=degrees)
@@ -142,6 +142,11 @@ def run_master():
                                 print("[ERROR] Angle must be an integer value")
                         else:
                             print("[ERROR] Specify an angle for rotation in degrees")
+                    elif cmd == "go_to_calib" or cmd == "goto_calib":
+                        print(f"[MODBUS TX] Writing GO_TO_CALIBRATED_POSITION command")
+                        time.sleep_ms(20) # Delay before write
+                        modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_CMD, 8) # Command 8 is GO_TO_CALIBRATED_POSITION
+                        time.sleep_ms(20) # Delay after write
                     elif cmd == "set_verbose":
                         if len(parts) > 1:
                             level = int(parts[1])
@@ -173,10 +178,33 @@ def run_master():
                          print(f"[INFO] Command '{cmd}' acknowledged. Status/data read periodically.")
                          if cmd == "help":
                              # Show help locally on PC side if needed, Main Pico doesn't need it
-                             print("--- Relay Pico Help ---")
+                             print("\n" + "="*60)
+                             print(" "*20 + "RELAY PICO COMMAND HELP")
+                             print("="*60)
                              print("Commands are sent to Main Pico via Modbus.")
-                             print("Status (speed, VFD status, encoder) is read periodically.")
-                             print("Available commands to send: start [rpm], stop, reverse [rpm], set_speed [rpm], reset_fault, calibrate, home, rotate [angle], set_verbose [0-3], set_encoder_output [step|deg]")
+                             print("Status (speed, VFD status, encoder) is read every 5 seconds.\n")
+                             
+                             print("MOTOR CONTROL:")
+                             print("  start [rpm]      - Start motor forward (optional RPM)")
+                             print("  stop             - Stop motor")
+                             print("  reverse [rpm]    - Start motor reverse (optional RPM)")
+                             print("  set_speed [rpm]  - Change running motor speed or set for next start")
+                             
+                             print("\nPOSITIONING:")
+                             print("  home             - Run homing sequence to find Z-pulse")
+                             print("  calibrate        - Set current position as zero point")
+                             print("  rotate [angle]   - Rotate specified angle in degrees (+ or -)")
+                             print("  go_to_calib      - Move to calibrated zero position")
+                             
+                             print("\nMAINTENANCE & SETTINGS:")
+                             print("  reset_fault      - Attempt to clear VFD fault")
+                             print("  set_verbose [0-3] - Set Main Pico verbosity level")
+                             print("  set_encoder_output [step|deg] - Set encoder output mode")
+                             
+                             print("\nSTATUS & HELP:")
+                             print("  status           - Force immediate status read")
+                             print("  help             - Show this help message")
+                             print("="*60 + "\n")
                     else:
                         print(f"[ERROR] Unknown command: {cmd}")
 

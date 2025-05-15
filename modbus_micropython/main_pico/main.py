@@ -57,10 +57,10 @@ HOMING_TIMEOUT_MS = 90000    # Timeout for major homing phases (e.g., P1, P3 sea
 HOMING_BACKUP_DURATION_MS = 30000 # Max duration for backup phase (P2)
 
 # --- Positioning Parameters ---
-POSITIONING_RPM = 600        # RPM to use during rotate commands
+POSITIONING_RPM = 800        # RPM to use during rotate commands
 MIN_ROTATION_ANGLE_DEG = 1.0 # Minimum angle to rotate (smaller values rejected)
 POSITIONING_STOP_MARGIN_DEG = 5.0 # Stop motor this many degrees before target to account for inertia
-POSITIONING_TIMEOUT_MS = 30000 # Timeout for positioning movements
+POSITIONING_TIMEOUT_MS = 60000 # Timeout for positioning movements
 
 # --- Hardware Initialization ---
 led = Pin(LED_PIN, Pin.OUT)
@@ -273,6 +273,51 @@ def handle_command_register_write(reg_type, address, val):
             
         # Note: We don't clear the command register here - the positioning task will clear it when complete
 
+    elif command_to_process == 8: # GO_TO_CALIBRATED_POSITION
+        print_verbose(f"[ACTION CB] GO_TO_CALIBRATED_POSITION command (8) received.", 0)
+        
+        # Check if positioning is already in progress
+        if positioning_in_progress_event.is_set() or homing_in_progress_event.is_set():
+            print_verbose("[WARNING CB] GO_TO_CALIBRATED_POSITION command received, but positioning or homing already in progress. Ignoring.", 1)
+            try:
+                modbus_slave_handler.set_hreg(REG_CMD, 0)
+                internal_state['last_written_cmd'] = 0
+            except Exception as e:
+                print_verbose(f"[ERROR CB] Failed to clear REG_CMD for GO_TO_CALIBRATED_POSITION: {e}", 0)
+            return
+            
+        # Check if homing has been completed
+        if not internal_state['homing_completed']:
+            print_verbose("[ERROR CB] GO_TO_CALIBRATED_POSITION command failed: Homing must be completed first.", 0)
+            try:
+                modbus_slave_handler.set_hreg(REG_CMD, 0)
+                internal_state['last_written_cmd'] = 0
+            except Exception as e:
+                print_verbose(f"[ERROR CB] Failed to clear REG_CMD for GO_TO_CALIBRATED_POSITION: {e}", 0)
+            return
+            
+        # Schedule the go_to_calibrated_position task
+        if vfd_master:
+            print_verbose("[INFO CB] Starting movement to calibrated position...", 0)
+            
+            # Create and start the task to go to calibrated position
+            asyncio.create_task(go_to_calibrated_position(vfd_master))
+            
+            # Clear the command register immediately since the task has its own completion handling
+            try:
+                modbus_slave_handler.set_hreg(REG_CMD, 0)
+                internal_state['last_written_cmd'] = 0
+                print_verbose("[DEBUG CB] REG_CMD (for GO_TO_CALIBRATED_POSITION) cleared after scheduling task.", 3)
+            except Exception as e:
+                print_verbose(f"[ERROR CB] Failed to clear REG_CMD for GO_TO_CALIBRATED_POSITION: {e}", 0)
+        else:
+            print_verbose("[ERROR CB] GO_TO_CALIBRATED_POSITION command: vfd_master is None. Cannot schedule movement.", 0)
+            try:
+                modbus_slave_handler.set_hreg(REG_CMD, 0)
+                internal_state['last_written_cmd'] = 0
+            except Exception as e:
+                print_verbose(f"[ERROR CB] Failed to clear REG_CMD for GO_TO_CALIBRATED_POSITION: {e}", 0)
+
     elif command_to_process in [2, 4, 5]: # STOP, RESET_FAULT, CALIBRATE
         rpm_from_payload = 0
         if isinstance(val, list) and len(val) > 1:
@@ -474,6 +519,14 @@ async def homing(cfw500_master_obj):
         print_verbose("[HOMING P3] Z-pulse detected & motor stopped. Settling...", 2)
         await asyncio.sleep_ms(SETTLE_TIME_MS)
         print_verbose("[INFO HOMING] Homing routine successful.", 0)
+        
+        # After successful homing, move to the calibrated position (where internal_absolute_degrees = 0)
+        print_verbose("[INFO HOMING] Now moving to user's calibrated position...", 0)
+        calib_pos_result = await go_to_calibrated_position(cfw500_master_obj)
+        if calib_pos_result:
+            print_verbose("[INFO HOMING] Successfully moved to calibrated position.", 0)
+        else:
+            print_verbose("[WARNING HOMING] Homing was successful, but movement to calibrated position failed.", 1)
 
     except Exception as e:
         print_verbose(f"[ERROR HOMING] Homing routine failed: {e}", 0)
@@ -606,6 +659,101 @@ async def position_motor(cfw500_master_obj, angle_from_command): # angle_from_co
             
         positioning_in_progress_event.clear()
         print_verbose("[INFO POSITION] Positioning task execution completed.", 1)
+
+
+# --- Go to Calibrated Position Task ---
+async def go_to_calibrated_position(cfw500_master_obj):
+    """
+    Rotates the motor to the user-calibrated position (where internal_absolute_degrees = 0)
+    after successful homing.
+    """
+    # Check if homing was completed successfully
+    if not internal_state['homing_completed']:
+        print_verbose("[ERROR CALIB_POS] Cannot move to calibrated position: Homing not completed.", 0)
+        return False
+        
+    print_verbose("[INFO CALIB_POS] Moving to user calibrated position...", 0)
+    
+    try:
+        # Get current position relative to calibrated zero
+        current_absolute_degrees = internal_state['internal_absolute_degrees']
+        
+        print_verbose(f"[DEBUG CALIB_POS] Current absolute_degrees: {current_absolute_degrees:.2f}°, Target: 0.00°", 1)
+        
+        # Check if we're already close enough to the calibrated position
+        if abs(current_absolute_degrees) <= MIN_ROTATION_ANGLE_DEG:
+            print_verbose("[INFO CALIB_POS] Already at calibrated position (within tolerance).", 0)
+            return True
+            
+        # Determine the direction and method of movement
+        if current_absolute_degrees > 0:
+            # Need to decrease absolute_degrees - can use position_motor
+            print_verbose(f"[INFO CALIB_POS] Using position_motor to decrease absolute_degrees by {current_absolute_degrees:.2f}°", 1)
+            await position_motor(cfw500_master_obj, current_absolute_degrees)
+            print_verbose("[INFO CALIB_POS] Movement to calibrated position completed.", 0)
+            return True
+        else:  # current_absolute_degrees < 0
+            # Need to increase absolute_degrees - must use direct VFD control
+            target_degrees = 0.0
+            angle_to_move = abs(current_absolute_degrees)
+            early_stop_degrees = target_degrees - MIN_ROTATION_ANGLE_DEG  # Stop slightly before target
+            
+            print_verbose(f"[INFO CALIB_POS] Using VFD REVERSE to increase absolute_degrees by {angle_to_move:.2f}°", 1)
+            
+            try:
+                # Start VFD in REVERSE direction (which increases absolute_degrees)
+                cfw500_master_obj.reverse_motor(POSITIONING_RPM)
+                print_verbose(f"[INFO CALIB_POS] Motor started in REVERSE at {POSITIONING_RPM} RPM", 1)
+                await asyncio.sleep_ms(100)  # Allow motor to start
+                
+                # Monitor position until we reach target
+                start_time_ms = time.ticks_ms()
+                position_reached = False
+                
+                while time.ticks_diff(time.ticks_ms(), start_time_ms) < POSITIONING_TIMEOUT_MS:
+                    current_position = internal_state['internal_absolute_degrees']
+                    
+                    # For REVERSE movement (increasing values), stop when we reach or exceed early_stop_degrees
+                    if current_position >= early_stop_degrees:
+                        position_reached = True
+                        break
+                    
+                    print_verbose(f"[DEBUG CALIB_POS] Current: {current_position:.2f}°, Target: {target_degrees:.2f}°, Early stop: {early_stop_degrees:.2f}°", 3)
+                    await asyncio.sleep_ms(20)
+                
+                # Stop the motor
+                cfw500_master_obj.stop_motor()
+                print_verbose(f"[INFO CALIB_POS] Motor stopped. Waiting {SETTLE_TIME_MS}ms to settle.", 1)
+                await asyncio.sleep_ms(SETTLE_TIME_MS)
+                
+                # Check final position and report results
+                final_position = internal_state['internal_absolute_degrees']
+                position_error = final_position - target_degrees
+                
+                if position_reached:
+                    print_verbose(f"[INFO CALIB_POS] Reached calibrated position. Final: {final_position:.2f}°, Error: {position_error:.2f}°", 0)
+                    return True
+                else:
+                    print_verbose(f"[ERROR CALIB_POS] Timeout reached. Final: {final_position:.2f}°, Error: {position_error:.2f}°", 0)
+                    return False
+                
+            except Exception as e:
+                print_verbose(f"[ERROR CALIB_POS] Error during reverse movement: {e}", 0)
+                try:
+                    cfw500_master_obj.stop_motor()
+                    await asyncio.sleep_ms(SETTLE_TIME_MS)
+                except Exception as stop_e:
+                    print_verbose(f"[ERROR CALIB_POS] Failed to stop motor during error cleanup: {stop_e}", 0)
+                return False
+    
+    except Exception as e:
+        print_verbose(f"[ERROR CALIB_POS] Failed to move to calibrated position: {e}", 0)
+        try:
+            cfw500_master_obj.stop_motor()
+            await asyncio.sleep_ms(SETTLE_TIME_MS)
+        except Exception as stop_e:
+            print_verbose(f"[ERROR CALIB_POS] Failed to stop motor during error cleanup: {stop_e}", 0)
+        return False
 
 
 # --- Background Tasks ---

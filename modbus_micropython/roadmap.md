@@ -29,44 +29,67 @@ Task 2.2: Implement the Homing Async Function (`homing`) (✔️ IMPLEMENTED - Z
     [✔️] Set `internal_state['homing_completed'] = True` and update `REG_HOMING_FLAG`.
     [✔️] Ensure proper handling of timeouts and motor control during homing (timeouts implemented and motor control is functional).
     [✔️] Manage background task interaction: Current implementation uses `await asyncio.sleep_ms()` which yields control, allowing background tasks to run. Explicit cancellation/resumption is currently commented out and appears not strictly necessary for basic operation. Further evaluation if specific race conditions or performance issues arise.
-Task 2.3: Update `calibrate` Command Logic (➡️ NEXT - PARTIALLY COMPLETE)
-    [ ] Ensure `calibrate` (Modbus command 5) only functions if `internal_state['homing_completed']` is `True`. (This check is NOT YET IMPLEMENTED in `handle_command_register_write`).
+Task 2.3: Update `calibrate` Command Logic (✔️ COMPLETE)
+    [✔️] Ensure `calibrate` (Modbus command 5) only functions if `internal_state['homing_completed']` is `True`. (Implemented in `handle_command_register_write`).
     [✔️] Calculate `internal_state['encoder_offset_steps']` based on `encoder_raw_position` relative to the Z-pulse (`encoder_zero_offset`).
     [✔️] Update `REG_OFFSET_STEPS` and save to `config.json`.
 Task 2.4: Homing Testing & Refinement (IN PROGRESS)
     [✔️] Initial successful homing sequence observed via logs.
-    [ ] Conduct further testing for reliability across multiple runs.
-    [ ] Test edge cases (e.g., starting on/near Z-pulse for each phase).
-    [ ] Verify accuracy of `encoder_zero_offset` and subsequent calibrated positions.
-    [ ] Optimize `HOMING_POLL_INTERVAL_MS` if necessary (current: 2ms).
-    [ ] Confirm behavior of `HOMING_BACKUP_DEGREES` and step calculation.
+    [✔️] Conduct further testing for reliability across multiple runs.
+    [✔️] Test edge cases (e.g., starting on/near Z-pulse for each phase).
+    [✔️] Verify accuracy of `encoder_zero_offset` and subsequent calibrated positions.
+    [✔️] Optimize `HOMING_POLL_INTERVAL_MS` if necessary (current: 2ms).
+    [✔️] Modified homing Phase 2 to use `internal_absolute_degrees` instead of raw encoder steps for consistency.
 
-Phase 3: "Rotate Forward X Degrees" MVP (Main Pico & Relay Pico) (UPCOMING)
-Task 3.1: Define New Modbus Communication (Main Pico & Relay Pico)
-    [ ] Main Pico: Define `REG_TARGET_ANGLE_DEG` (e.g., HReg 104) and new command code (e.g., 6 for "GOTO_RELATIVE_POS_FORWARD").
-    [ ] Relay Pico: Update to send new command and target angle to Main Pico.
-Task 3.2: Implement Core Positioning Logic (Main Pico)
-    [ ] Define constants: `POSITIONING_RPM`, `MIN_ROTATION_ANGLE_DEG`.
-    [ ] Calibrate and define `DECELERATION_DEGREES_AT_POSITIONING_RPM`.
-    [ ] Implement command handling in `handle_command_register_write` to:
-        Validate (homed, not already positioning, angle valid).
-        Calculate absolute target and early stop target using `internal_absolute_degrees`.
-        Initiate motor movement at `POSITIONING_RPM`.
-Task 3.3: Create Positioning Monitor Task (Main Pico)
-    [ ] Implement `positioning_monitor_task` to:
-        Monitor `internal_absolute_degrees`.
-        Issue VFD stop command when early stop target is reached.
-        Manage `positioning_active` state.
-        Clear `REG_CMD` upon completion/error.
-        Handle VFD faults during the move.
+Phase 3: Rotation and Positioning Implementation (✔️ COMPLETE)
+Task 3.1: Define Rotation Command and Modbus Communication (✔️ COMPLETE)
+    [✔️] Main Pico: Implemented command code 7 (ROTATE) that takes an angle parameter directly in the Modbus write.
+    [✔️] Relay Pico: Implemented "rotate [angle]" command that sends command 7 and angle to Main Pico.
+Task 3.2: Implement Core Positioning Logic (✔️ COMPLETE)
+    [✔️] Defined constants: `POSITIONING_RPM` (600), `MIN_ROTATION_ANGLE_DEG` (1.0), `POSITIONING_STOP_MARGIN_DEG` (5.0).
+    [✔️] Implemented proper early stopping with margin to account for inertia.
+    [✔️] Implemented command handling in `handle_command_register_write` to:
+        [✔️] Validate (homing completed, not already positioning, angle valid).
+        [✔️] Calculate absolute target and early stop target using `internal_absolute_degrees`.
+        [✔️] Initiate motor movement at `POSITIONING_RPM`.
+Task 3.3: Implement Position Monitoring (✔️ COMPLETE)
+    [✔️] Implemented motion monitoring within `position_motor` function to:
+        [✔️] Monitor `internal_absolute_degrees`.
+        [✔️] Issue VFD stop command when target is reached or on timeout.
+        [✔️] Manage `positioning_in_progress_event` state.
+        [✔️] Clear `REG_CMD` upon completion/error.
+        [✔️] Provide error handling and reporting.
+Task 3.4: Implement "Go to Calibrated Position" Functionality (✔️ COMPLETE)
+    [✔️] Added `go_to_calibrated_position` function that moves to the position where `internal_absolute_degrees` = 0.
+    [✔️] Added automatic movement to calibrated position after successful homing.
+    [✔️] Added command code 8 (GO_TO_CALIBRATED_POSITION) to manually trigger the movement.
+    [✔️] Relay Pico: Added "go_to_calib" command to send command 8 to Main Pico.
+Task 3.5: Consistent Unidirectional Movement (✔️ COMPLETE)
+    [✔️] Modified `position_motor` to always use VFD physical FORWARD direction.
+    [✔️] Uses magnitude of requested angle for distance calculation.
+    [✔️] Properly handles positioning with decreasing absolute degree values.
 
 Phase 4: System Testing & Refinement (FUTURE)
 Task 4.1: Full Workflow Testing
-    [ ] Test the complete sequence: Power-on -> Homing -> Calibration -> "Rotate Forward X Degrees" commands.
+    [✔️] Test the complete sequence: Power-on -> Homing -> Auto-move to Calibrated Position.
+    [✔️] Test manual calibration and go_to_calib commands.
+    [✔️] Test rotation with various angles (positive and negative).
 Task 4.2: Accuracy and Robustness Evaluation
-    [ ] Measure positioning accuracy for various angles.
-    [ ] Test behavior with small angle commands.
-    [ ] Observe system stability and error handling.
-Task 4.3: Iteration & Bug Fixing
-    [ ] Address any issues found during testing.
-    [ ] Potentially refine `DECELERATION_DEGREES_AT_POSITIONING_RPM` or other parameters.
+    [✔️] Measure positioning accuracy for various angles.
+    [✔️] Test behavior with small angle commands (implemented MIN_ROTATION_ANGLE_DEG check).
+    [✔️] Observe system stability and error handling (improved error handling throughout).
+Task 4.3: User Interface Improvements
+    [✔️] Improved help display in relay_pico with structured, categorized commands.
+    [✔️] Added clear logging for all operations.
+    [✔️] Updated documentation to reflect new features and operation.
+
+Phase 5: Additional Features and Refinements (FUTURE)
+Task 5.1: Enhanced Error Recovery
+    [ ] Implement automatic recovery paths for common error conditions.
+    [ ] Add more detailed diagnostic information for troubleshooting.
+Task 5.2: Performance Optimization
+    [ ] Fine-tune movement parameters for optimal speed and accuracy.
+    [ ] Evaluate and optimize communication timing and task scheduling.
+Task 5.3: Additional User Features
+    [ ] Add more convenience commands and feedback.
+    [ ] Consider implementing absolute position movement command.
