@@ -15,7 +15,7 @@ MAX_DEGREES = 360  # Maximum degrees before reset
 # Store encoder instance globally if needed elsewhere, otherwise keep local
 _encoder_instance = None
 
-def initialize_encoder(pin_a_num, pin_b_num):
+def initialize_encoder(pin_a_num, pin_b_num, modbus_handler_instance):
     """Initializes the encoder driver and sets the callback."""
     global _encoder_instance
     pin_a = Pin(pin_a_num, Pin.IN, Pin.PULL_UP)
@@ -30,13 +30,13 @@ def initialize_encoder(pin_a_num, pin_b_num):
         vmax=None,     # No max limit
         mod=None,      # No modulus wrapping in the driver itself
         callback=encoder_callback, # Function to call on value change
-        args=(),       # No extra args for callback
+        args=(modbus_handler_instance,), # Pass it as a tuple
         delay=10       # Delay in ms between callbacks (rate limit)
     )
     print_verbose("[INFO] Encoder initialized.", 2)
     return _encoder_instance
 
-def encoder_callback(value, delta):
+def encoder_callback(value, delta, modbus_handler):
     """
     Callback function executed by the Encoder driver when the value changes.
     Updates internal state and Modbus input registers.
@@ -84,7 +84,7 @@ def encoder_callback(value, delta):
 
     # --- Update Modbus Input Registers ---
     # Update registers with the final calculated values (relative to calibrated zero, potentially wrapped)
-    update_input_registers(enc_steps=wrapped_position_steps, enc_deg=degrees)
+    update_input_registers(modbus_handler, enc_steps=wrapped_position_steps, enc_deg=degrees)
 
     # --- Local Printing based on Verbosity and Mode ---
     # Read mode from internal state (which should reflect Modbus holding register)

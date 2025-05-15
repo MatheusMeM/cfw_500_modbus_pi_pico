@@ -139,3 +139,65 @@ Task 5.2: Full System Test
 [ ] Observe accuracy and behavior.
 [ ] Check VFD fault handling during positioning.
 This checklist provides a structured approach for RooCode. Each task builds upon the previous one. Remember to commit frequently after completing and testing each logical sub-task.
+
+Phase 1: Encoder Enhancements & Basic Setup (Main Pico)
+Task 1.1: Enable Encoder Initialization & Basic Absolute Tracking (CURRENT FOCUS)
+[ ] In main_pico/main.py:
+Uncomment initialize_encoder(16, 17).
+Update print message for encoder status.
+Adjust STATUS_REQUEST_INTERVAL_MS to 1000 for testing.
+[ ] In main_pico/utils.py:
+Add 'internal_absolute_degrees': 0.0 to internal_state.
+[ ] In main_pico/encoder_module.py (encoder_callback):
+Define STEPS_PER_DEGREE = MAX_STEPS / 360.0.
+Ensure internal_state['encoder_raw_position'] is updated.
+Calculate and store internal_state['internal_absolute_degrees'] using encoder_raw_position, encoder_zero_offset, and encoder_offset_steps.
+Retain existing logic for wrapped_position_steps and degrees (0-360) for Modbus reporting.
+(Optional) Add debug print for internal_absolute_degrees.
+Verification: Confirm wrapped EncSteps/EncDeg update on Relay Pico. Confirm (via debug) internal_absolute_degrees accumulates correctly on Main Pico.
+Phase 2: Homing Implementation (Main Pico)
+Task 2.1: Define Homing Constants & Refine State
+[ ] Define HOMING_SEARCH_RPM, HOMING_CREEP_RPM, HOMING_BACKUP_DEGREES.
+Task 2.2: Implement the Homing Async Function (homing)
+[ ] Uncomment homing call in main(), manage background task cancellation/restarting around it.
+[ ] Implement Phase 1: Coarse Search (optional but recommended).
+[ ] Implement Phase 2: Backup Past Z-Pulse.
+[ ] Implement Phase 3: Slow Forward Approach to Z-Pulse, capture encoder_zero_offset, set homing_completed.
+[ ] Handle timeouts and errors robustly.
+Task 2.3: Update calibrate Command Logic
+[ ] Ensure calibrate only runs if homed.
+[ ] Correctly calculate encoder_offset_steps based on encoder_raw_position and encoder_zero_offset.
+[ ] Update REG_OFFSET_STEPS and save config.
+Phase 3: "Rotate Forward X Degrees" MVP (Main Pico)
+Task 3.1: Define New Modbus Registers & Constants
+[ ] Add REG_TARGET_ANGLE_DEG (HReg 104) to utils.py and slave_registers.
+[ ] Define POSITIONING_RPM, DECELERATION_DEGREES_AT_POSITIONING_RPM (calibrate this value later), MIN_ROTATION_ANGLE_DEG.
+[ ] Define GOTO_RELATIVE_POS_FORWARD command code (e.g., 6).
+Task 3.2: Add State for Positioning Move
+[ ] Add positioning_active, positioning_final_target_abs_deg, positioning_early_stop_abs_deg to internal_state.
+Task 3.3: Implement "Rotate Forward" Command Handling in handle_command_register_write
+[ ] Handle new command code.
+[ ] Validate (homed, not already positioning, angle positive).
+[ ] Calculate targets using internal_absolute_degrees.
+[ ] Set positioning_active = True, start motor. Do not clear REG_CMD here.
+Task 3.4: Create positioning_monitor_task()
+[ ] Runs continuously, acts when positioning_active == True.
+[ ] Monitors internal_absolute_degrees against positioning_early_stop_abs_deg.
+[ ] Issues vfd_master.stop_motor() when early stop target is reached.
+[ ] Waits for deceleration, logs final position/error.
+[ ] Sets positioning_active = False, clears REG_CMD in slave_registers (HReg 100).
+[ ] Handles VFD faults during positioning.
+[ ] Start this task in main().
+Phase 4: Relay Pico Integration
+Task 4.1: Add New Command to Relay Pico
+[ ] In relay_pico/main.py:
+Define REG_TARGET_ANGLE_DEG = 104.
+Add PC command rotate_fwd <degrees>.
+Relay Pico writes int(degrees * 10) to Main Pico's REG_TARGET_ANGLE_DEG (HReg 104) using write_single_register.
+Relay Pico writes command code (e.g., 6) to Main Pico's REG_CMD (HReg 100) using write_single_register.
+Phase 5: Calibration and Testing
+Task 5.1: Calibrate DECELERATION_DEGREES_AT_POSITIONING_RPM
+[ ] Manually determine and update this constant.
+Task 5.2: Full System Test
+[ ] Test complete workflow: Homing -> Calibrate -> Rotate Forward.
+[ ] Evaluate accuracy and robustness.

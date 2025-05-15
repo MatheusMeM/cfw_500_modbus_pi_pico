@@ -420,7 +420,8 @@ async def main():
     update_input_registers(modbus_slave_handler, homing=False) # Explicitly set homing to false initially # Keep this
 
     # Initialize Encoder (uses internal_state, updates slave_registers via callback)
-    initialize_encoder(16, 17) # Pins for encoder A, B
+    # modbus_slave_handler is initialized earlier in main.py
+    initialize_encoder(16, 17, modbus_slave_handler)
     print_verbose("[INFO] Encoder ENABLED.", 0)
 
     # --- Safety Stop ---
