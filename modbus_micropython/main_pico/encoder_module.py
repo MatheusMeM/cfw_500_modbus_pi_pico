@@ -44,9 +44,9 @@ def encoder_callback(value, delta, modbus_handler):
     # STEPS_PER_DEGREE is now imported from utils.py
     # Invert the raw value to correct the direction if necessary
     # Adjust this based on your wiring and desired positive direction
-    # OLD: inverted_value = -value
-    # NEW: To make VFD forward = positive degree change
-    inverted_value = value
+    # Adjust this based on your wiring and desired positive direction
+    # For polling logic, ensuring VFD Reverse => encoder_raw_position INCREASES
+    inverted_value = -value
     internal_state['encoder_raw_position'] = inverted_value
 
     # Position relative to the homing switch trigger point
