@@ -9,7 +9,7 @@ CONFIG_FILE = "config.json"
 
 # --- Encoder Constants ---
 # These values should be configured based on your specific encoder.
-PULSES_PER_REVOLUTION = 1000  # Native pulses per revolution of the encoder
+PULSES_PER_REVOLUTION = 2000  # Native pulses per revolution of the encoder
 ENCODER_RESOLUTION = PULSES_PER_REVOLUTION * 4  # Steps per revolution after 4x quadrature decoding
 MAX_STEPS = ENCODER_RESOLUTION  # Max steps for one full revolution, used for wrapping/calculations
 MAX_DEGREES = 360.0             # Standard degrees in a circle
