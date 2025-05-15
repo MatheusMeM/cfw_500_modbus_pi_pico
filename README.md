@@ -226,3 +226,12 @@ This project is licensed under the [MIT License](LICENSE). The included `encoder
 -   `umodbus` library developers.
 -   WEG for CFW500 documentation.
 -   Omron for encoder specifications.
+
+
+##REMEMBER
+# --- Homing Parameters ---
+HOMING_SEARCH_RPM = 800      # RPM for the initial search for the Z-pulse
+HOMING_CREEP_RPM = 400       # RPM for the slow final approach to the Z-pulse
+HOMING_BACKUP_DEGREES = 20.0 # Degrees to back up past Z-pulse after initial find
+HOMING_TIMEOUT_MS = 90000    # Timeout for major homing phases (e.g., P1, P3 search)
+HOMING_BACKUP_DURATION_MS = 30000 # Max duration for backup phase (P2)

@@ -56,6 +56,12 @@ HOMING_BACKUP_DEGREES = 20.0 # Degrees to back up past Z-pulse after initial fin
 HOMING_TIMEOUT_MS = 30000    # Timeout for major homing phases (e.g., P1, P3 search)
 HOMING_BACKUP_DURATION_MS = 10000 # Max duration for backup phase (P2)
 
+# --- Positioning Parameters ---
+POSITIONING_RPM = 600        # RPM to use during rotate commands
+MIN_ROTATION_ANGLE_DEG = 1.0 # Minimum angle to rotate (smaller values rejected)
+POSITIONING_STOP_MARGIN_DEG = 5.0 # Stop motor this many degrees before target to account for inertia
+POSITIONING_TIMEOUT_MS = 30000 # Timeout for positioning movements
+
 # --- Hardware Initialization ---
 led = Pin(LED_PIN, Pin.OUT)
 led.on() # Turn LED on permanently
@@ -207,6 +213,65 @@ def handle_command_register_write(reg_type, address, val):
             print_verbose(f"[DEBUG CB] REG_CMD (for HOME) cleared.", 3)
         except Exception as e:
             print_verbose(f"[ERROR CB] Failed to clear REG_CMD for HOME: {e}", 0)
+            
+    elif command_to_process == 7: # ROTATE Command
+        print_verbose(f"[ACTION CB] ROTATE command (7) received.", 0)
+        
+        # Extract angle from payload
+        angle_to_rotate = 0
+        if isinstance(val, list) and len(val) > 1:
+            angle_to_rotate = val[1]
+            print_verbose(f"[DEBUG CB] ROTATE with target angle: {angle_to_rotate} degrees", 2)
+        else:
+            print_verbose("[ERROR CB] ROTATE command received without angle parameter.", 0)
+            # Clear command register and exit
+            try:
+                modbus_slave_handler.set_hreg(REG_CMD, 0)
+                internal_state['last_written_cmd'] = 0
+            except Exception as e:
+                print_verbose(f"[ERROR CB] Failed to clear REG_CMD for ROTATE: {e}", 0)
+            return
+        
+        # Check if angle is valid
+        if abs(angle_to_rotate) < MIN_ROTATION_ANGLE_DEG:
+            print_verbose(f"[ERROR CB] ROTATE angle too small (min: {MIN_ROTATION_ANGLE_DEG}°)", 0)
+            try:
+                modbus_slave_handler.set_hreg(REG_CMD, 0)
+                internal_state['last_written_cmd'] = 0
+            except Exception as e:
+                print_verbose(f"[ERROR CB] Failed to clear REG_CMD for ROTATE: {e}", 0)
+            return
+            
+        # Check if homing has been completed
+        if not internal_state['homing_completed']:
+            print_verbose("[ERROR CB] ROTATE command failed: Homing must be completed first.", 0)
+            try:
+                modbus_slave_handler.set_hreg(REG_CMD, 0)
+                internal_state['last_written_cmd'] = 0
+            except Exception as e:
+                print_verbose(f"[ERROR CB] Failed to clear REG_CMD for ROTATE: {e}", 0)
+            return
+            
+        # Check if positioning is already in progress
+        if positioning_in_progress_event.is_set():
+            print_verbose("[WARNING CB] ROTATE command received, but positioning already in progress. Ignoring.", 1)
+            try:
+                modbus_slave_handler.set_hreg(REG_CMD, 0)
+                internal_state['last_written_cmd'] = 0
+            except Exception as e:
+                print_verbose(f"[ERROR CB] Failed to clear REG_CMD for ROTATE: {e}", 0)
+            return
+            
+        # All checks passed, schedule the positioning task
+        if vfd_master:
+            print_verbose(f"[INFO CB] Starting rotation of {angle_to_rotate} degrees...", 0)
+            
+            # Create and start the positioning task
+            asyncio.create_task(position_motor(vfd_master, angle_to_rotate))
+        else:
+            print_verbose("[ERROR CB] ROTATE command: vfd_master is None. Cannot schedule positioning.", 0)
+            
+        # Note: We don't clear the command register here - the positioning task will clear it when complete
 
     elif command_to_process in [2, 4, 5]: # STOP, RESET_FAULT, CALIBRATE
         rpm_from_payload = 0
@@ -275,6 +340,7 @@ print_verbose("[INFO] Modbus Slave Handler (UART1 for Relay) initialized and reg
 # --- Async Events ---
 endstop_event = asyncio.Event()
 homing_in_progress_event = asyncio.Event() # For signalling commanded homing
+positioning_in_progress_event = asyncio.Event() # For signalling positioning movement
 
 # --- Homing ---
 def endstop_triggered_callback_irq(pin):
@@ -426,6 +492,111 @@ async def homing(cfw500_master_obj):
     finally:
         homing_in_progress_event.clear()
         print_verbose(f"[DEBUG HOMING] Homing routine finished. Homing completed status: {internal_state['homing_completed']}", 3)
+
+
+# --- Positioning Task ---
+async def position_motor(cfw500_master_obj, angle_degrees):
+    """
+    Rotates the motor by the specified angle (degrees) from the current position.
+    Stops when target position is reached.
+    """
+    if positioning_in_progress_event.is_set():
+        print_verbose("[WARNING POSITION] Positioning task already in progress.", 1)
+        return
+        
+    positioning_in_progress_event.set()
+    print_verbose(f"[INFO POSITION] Starting positioning operation: {angle_degrees}°", 0)
+    
+    try:
+        # Get current absolute position
+        current_absolute_degrees = internal_state['internal_absolute_degrees']
+        print_verbose(f"[DEBUG POSITION] Current absolute position: {current_absolute_degrees:.2f}°", 2)
+        
+        # Calculate target position
+        target_absolute_degrees = current_absolute_degrees + angle_degrees
+        
+        # Calculate early stop position (to account for motor inertia)
+        early_stop_degrees = target_absolute_degrees
+        if angle_degrees > 0:
+            early_stop_degrees -= POSITIONING_STOP_MARGIN_DEG
+        else:
+            early_stop_degrees += POSITIONING_STOP_MARGIN_DEG
+            
+        print_verbose(f"[DEBUG POSITION] Target: {target_absolute_degrees:.2f}°, Early stop: {early_stop_degrees:.2f}°", 2)
+        
+        # Determine direction and start motor
+        try:
+            if angle_degrees > 0:
+                # Forward rotation
+                print_verbose(f"[INFO POSITION] Starting motor forward at {POSITIONING_RPM} RPM", 1)
+                cfw500_master_obj.start_motor(POSITIONING_RPM)
+            else:
+                # Reverse rotation
+                print_verbose(f"[INFO POSITION] Starting motor reverse at {POSITIONING_RPM} RPM", 1)
+                cfw500_master_obj.reverse_motor(POSITIONING_RPM)
+                
+            await asyncio.sleep_ms(50) # Small delay to ensure motor starts
+        except Exception as e:
+            print_verbose(f"[ERROR POSITION] Failed to start motor: {e}", 0)
+            raise e
+            
+        # Monitor position until target reached
+        start_time_ms = time.ticks_ms()
+        position_reached = False
+        
+        while time.ticks_diff(time.ticks_ms(), start_time_ms) < POSITIONING_TIMEOUT_MS:
+            # Get current position
+            current_position = internal_state['internal_absolute_degrees']
+            
+            # Check if we've reached the early stop position
+            if angle_degrees > 0:
+                if current_position >= early_stop_degrees:
+                    position_reached = True
+                    break
+            else:
+                if current_position <= early_stop_degrees:
+                    position_reached = True
+                    break
+                    
+            print_verbose(f"[DEBUG POSITION] Current: {current_position:.2f}°, Target: {target_absolute_degrees:.2f}°", 3)
+            await asyncio.sleep_ms(20)
+            
+        # Stop the motor
+        try:
+            cfw500_master_obj.stop_motor()
+            print_verbose("[INFO POSITION] Motor stopped.", 1)
+            await asyncio.sleep_ms(SETTLE_TIME_MS)  # Wait for motor to fully stop
+        except Exception as e:
+            print_verbose(f"[ERROR POSITION] Failed to stop motor: {e}", 0)
+            raise e
+            
+        # Check result
+        if position_reached:
+            final_position = internal_state['internal_absolute_degrees']
+            position_error = abs(final_position - target_absolute_degrees)
+            print_verbose(f"[INFO POSITION] Position reached. Final: {final_position:.2f}°, Error: {position_error:.2f}°", 0)
+        else:
+            print_verbose("[ERROR POSITION] Timeout reached without getting to target position.", 0)
+            
+    except Exception as e:
+        print_verbose(f"[ERROR POSITION] Positioning failed: {e}", 0)
+        try:
+            cfw500_master_obj.stop_motor()
+            print_verbose("[SAFETY POSITION] Motor stopped after error.", 1)
+            await asyncio.sleep_ms(SETTLE_TIME_MS)
+        except Exception as stop_e:
+            print_verbose(f"[ERROR POSITION] Failed to stop motor after error: {stop_e}", 0)
+    finally:
+        # Clear command register
+        try:
+            modbus_slave_handler.set_hreg(REG_CMD, 0)
+            internal_state['last_written_cmd'] = 0
+            print_verbose("[DEBUG POSITION] Command register cleared.", 3)
+        except Exception as e:
+            print_verbose(f"[ERROR POSITION] Failed to clear command register: {e}", 0)
+            
+        positioning_in_progress_event.clear()
+        print_verbose("[INFO POSITION] Positioning task completed.", 1)
 
 
 # --- Background Tasks ---

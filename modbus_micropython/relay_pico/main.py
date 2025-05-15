@@ -129,6 +129,19 @@ def run_master():
                         time.sleep_ms(20) # Delay before write
                         modbus_master.write_single_register(MAIN_PICO_SLAVE_ADDR, REG_CMD, 6) # Home is 6
                         time.sleep_ms(20) # Delay after write
+                    elif cmd == "rotate":
+                        if len(parts) > 1:
+                            try:
+                                angle = int(parts[1])
+                                print(f"[MODBUS TX] Writing ROTATE command with angle={angle} degrees")
+                                time.sleep_ms(20) # Delay before write
+                                # Command 7 is ROTATE, with angle parameter
+                                modbus_master.write_multiple_registers(MAIN_PICO_SLAVE_ADDR, REG_CMD, [7, angle])
+                                time.sleep_ms(20) # Delay after write
+                            except ValueError:
+                                print("[ERROR] Angle must be an integer value")
+                        else:
+                            print("[ERROR] Specify an angle for rotation in degrees")
                     elif cmd == "set_verbose":
                         if len(parts) > 1:
                             level = int(parts[1])
@@ -163,7 +176,7 @@ def run_master():
                              print("--- Relay Pico Help ---")
                              print("Commands are sent to Main Pico via Modbus.")
                              print("Status (speed, VFD status, encoder) is read periodically.")
-                             print("Available commands to send: start [rpm], stop, reverse [rpm], set_speed [rpm], reset_fault, calibrate, home, set_verbose [0-3], set_encoder_output [step|deg]") # Added 'home'
+                             print("Available commands to send: start [rpm], stop, reverse [rpm], set_speed [rpm], reset_fault, calibrate, home, rotate [angle], set_verbose [0-3], set_encoder_output [step|deg]")
                     else:
                         print(f"[ERROR] Unknown command: {cmd}")
 
