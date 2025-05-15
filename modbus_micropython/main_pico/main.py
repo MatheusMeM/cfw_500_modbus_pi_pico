@@ -13,7 +13,8 @@ from utils import (
     # Add REG_CURRENT_RPM and REG_VFD_STATUS to the import list
     REG_CMD, REG_TARGET_RPM, REG_VERBOSE, REG_ENC_MODE, REG_OFFSET_STEPS,
     REG_FAULT_FLAG, REG_HOMING_FLAG, REG_MAX_RPM,
-    REG_CURRENT_RPM, REG_VFD_STATUS # These were missing for direct use in main.py
+    REG_CURRENT_RPM, REG_VFD_STATUS, # These were missing for direct use in main.py
+    STEPS_PER_DEGREE, MAX_STEPS # Added for homing function
 )
 from umodbus.serial import Serial as ModbusRTUSerial # Renamed for clarity, handles serial comms
 from umodbus.modbus import Modbus # Base class for register handling
@@ -233,31 +234,137 @@ def endstop_triggered_callback_irq(pin):
     # --- End IRQ Handler ---
 
 async def homing(cfw500_master_obj):
-    # Ensure globals are accessible if they are not already in this scope
+    """
+    Performs the multi-phase homing routine to find the encoder's Z-pulse.
+    Controls the VFD to move the motor through different stages for reliable detection.
+    """
+    # Ensure globals are accessible. These should be defined at the module level.
     # global modbus_slave_handler, internal_state, endstop_event, zero_pin
-    
-    print_verbose("[HOMING TEST] Manual Z-pulse test started.", 0)
-    endstop_event.clear() # Make sure event is clear
-    # Ensure zero_pin is defined and configured correctly (e.g. Pin(ZERO_ENDSTOP_PIN_NUM, Pin.IN, Pin.PULL_UP))
-    # Ensure endstop_triggered_callback_irq is defined (e.g. def endstop_triggered_callback_irq(pin): endstop_event.set())
-    
-    zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=endstop_triggered_callback_irq)
-    print_verbose("[HOMING TEST] IRQ attached. Manually trigger Z-pulse now...", 0)
+    # (No 'global' needed if they are module-level and accessed directly)
+
+    print_verbose("[INFO] Starting full multi-phase homing routine...", 0)
+    internal_state['homing_completed'] = False
+    update_input_registers(modbus_slave_handler, homing=False)
+    endstop_event.clear() # Ensure event is clear before starting
+
+    # STEPS_PER_DEGREE is now imported from utils.py
+    # Ensure HOMING_BACKUP_DEGREES is defined (e.g., 20.0)
+    # Ensure STEPS_PER_DEGREE is correctly calculated/imported based on MAX_STEPS from utils.py
+    # If STEPS_PER_DEGREE or MAX_STEPS are not yet in utils.py, this will cause an error.
+    # For now, assuming they will be added to utils.py or this part needs adjustment.
+    # If MAX_STEPS is not available from utils, we might need a local _MAX_STEPS_TEMP as before.
+    # Let's assume STEPS_PER_DEGREE is correctly available via import for now.
+    backup_steps_to_move = int(HOMING_BACKUP_DEGREES * STEPS_PER_DEGREE)
+
     try:
-        await asyncio.wait_for_ms(endstop_event.wait(), 30000) # 30s timeout
-        print_verbose("[HOMING TEST] SUCCESS: Z-pulse event received!", 0)
-    except asyncio.TimeoutError:
-        print_verbose("[HOMING TEST] TIMEOUT: Z-pulse event NOT received.", 0)
+        # --- Phase 1: Coarse Search for Z-pulse (Forward) ---
+        print_verbose(f"[HOMING] Phase 1: Coarse search forward at {HOMING_SEARCH_RPM} RPM...", 1)
+        cfw500_master_obj.start_motor(HOMING_SEARCH_RPM)
+        zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=endstop_triggered_callback_irq)
+        
+        try:
+            await asyncio.wait_for_ms(endstop_event.wait(), 60000) # 60-second timeout
+            print_verbose("[HOMING] Phase 1: Z-pulse detected during coarse search.", 2)
+            # Motor is still running here; stop it.
+        except asyncio.TimeoutError:
+            print_verbose("[ERROR HOMING] Phase 1: Timeout waiting for Z-pulse during coarse search.", 0)
+            # Attempt to stop motor and exit homing if Z-pulse not found in reasonable time/distance
+            cfw500_master_obj.stop_motor()
+            internal_state['homing_completed'] = False
+            update_input_registers(modbus_slave_handler, homing=False)
+            # Detach IRQ in the main finally block
+            return # Exit homing
+        finally:
+            # This inner finally ensures motor stop and IRQ detach specifically for Phase 1
+            # regardless of whether Z-pulse was found or timed out, before proceeding or returning.
+            cfw500_master_obj.stop_motor()
+            zero_pin.irq(handler=None) # Detach IRQ after this phase
+            endstop_event.clear()      # Clear event for next phase
+            print_verbose("[HOMING] Phase 1: Motor stopped, IRQ detached. Waiting for motor to settle...", 2)
+            await asyncio.sleep_ms(3500) # Wait for motor to physically stop (VFD ramp + margin)
+
+        # --- Phase 2: Backup Past Z-Pulse (Reverse) ---
+        # Motor has overshot the Z-pulse from Phase 1. Now back up.
+        print_verbose(f"[HOMING] Phase 2: Backing up {HOMING_BACKUP_DEGREES} degrees at {HOMING_CREEP_RPM} RPM...", 1)
+        start_backup_pos_raw = internal_state['encoder_raw_position']
+        cfw500_master_obj.reverse_motor(HOMING_CREEP_RPM)
+
+        backup_loop_start_time = time.ticks_ms()
+        moved_backup_steps = 0
+        while moved_backup_steps < backup_steps_to_move:
+            current_raw_pos = internal_state['encoder_raw_position']
+            # Calculate movement in reverse direction
+            if HOMING_CREEP_RPM > 0 : # Assuming reverse makes raw position decrease
+                 moved_backup_steps = start_backup_pos_raw - current_raw_pos
+            else: # Should not happen, but as a fallback
+                 moved_backup_steps = abs(current_raw_pos - start_backup_pos_raw)
+
+
+            if time.ticks_diff(time.ticks_ms(), backup_loop_start_time) > 45000: # 45s timeout for backup
+                print_verbose("[ERROR HOMING] Phase 2: Timeout during backup movement.", 0)
+                cfw500_master_obj.stop_motor()
+                internal_state['homing_completed'] = False
+                update_input_registers(modbus_slave_handler, homing=False)
+                return # Exit homing
+            await asyncio.sleep_ms(20) # Yield briefly, allow encoder updates
+
+        cfw500_master_obj.stop_motor()
+        print_verbose("[HOMING] Phase 2: Backup complete. Waiting for motor to settle...", 2)
+        await asyncio.sleep_ms(3500) # Wait for motor to stop
+
+        # --- Phase 3: Slow Forward Approach to Z-Pulse ---
+        print_verbose(f"[HOMING] Phase 3: Slow forward approach at {HOMING_CREEP_RPM} RPM...", 1)
+        cfw500_master_obj.start_motor(HOMING_CREEP_RPM)
+        endstop_event.clear() # Crucial: ensure event is clear before re-attaching IRQ
+        zero_pin.irq(trigger=Pin.IRQ_FALLING, handler=endstop_triggered_callback_irq)
+        
+        try:
+            await asyncio.wait_for_ms(endstop_event.wait(), 45000) # 45-second timeout for final approach
+            # Z-PULSE DETECTED!
+            # Stop motor IMMEDIATELY upon event detection.
+            # The IRQ sets the event, this task wakes up and stops the motor.
+            cfw500_master_obj.stop_motor()
+            
+            # Capture raw encoder position. It's assumed encoder_raw_position is updated
+            # frequently by the encoder_callback in its own async context.
+            # There might be a slight latency between IRQ and this capture.
+            internal_state['encoder_zero_offset'] = internal_state['encoder_raw_position']
+            internal_state['homing_completed'] = True
+            update_input_registers(modbus_slave_handler, homing=True)
+            print_verbose(f"[INFO] Homing complete. Encoder zero offset captured at raw steps: {internal_state['encoder_zero_offset']}", 0)
+            
+            # Wait for the motor to physically stop after the command.
+            print_verbose("[HOMING] Phase 3: Z-pulse detected. Waiting for motor to settle...", 2)
+            await asyncio.sleep_ms(3500)
+
+        except asyncio.TimeoutError:
+            print_verbose("[ERROR HOMING] Phase 3: Timeout waiting for Z-pulse during final approach.", 0)
+            cfw500_master_obj.stop_motor()
+            internal_state['homing_completed'] = False
+            update_input_registers(modbus_slave_handler, homing=False)
+            # IRQ will be detached in the main finally block
+            return # Exit homing
+        # No specific finally for IRQ here, handled by outer finally
+
+    except Exception as e:
+        print_verbose(f"[ERROR HOMING] An unexpected error occurred during homing: {e}", 0)
+        cfw500_master_obj.stop_motor() # Attempt to stop motor
+        internal_state['homing_completed'] = False
+        update_input_registers(modbus_slave_handler, homing=False)
+
     finally:
-        zero_pin.irq(handler=None) # Detach IRQ
-        print_verbose("[HOMING TEST] IRQ detached.", 0)
-    
-    # For testing, you might want to loop or add a long sleep here
-    # to prevent the main program from exiting or continuing if this is the only thing running.
-    # For example:
-    # print_verbose("[HOMING TEST] Test finished. Looping indefinitely...", 0)
-    # while True:
-    #     await asyncio.sleep_ms(1000)
+        # This main finally block ensures cleanup regardless of how homing exits.
+        zero_pin.irq(handler=None) # Always detach IRQ
+        endstop_event.clear()      # Always clear the event
+        
+        # Final check to ensure motor is stopped if homing didn't complete successfully.
+        if not internal_state['homing_completed']:
+            print_verbose("[HOMING] Ensuring motor is stopped after incomplete or failed homing attempt.", 1)
+            cfw500_master_obj.stop_motor() # Send stop one last time if needed
+            # Give it a moment if stop was just issued
+            await asyncio.sleep_ms(3000)
+        
+        print_verbose(f"[DEBUG] Homing routine finished. Homing completed status: {internal_state['homing_completed']}", 3)
 
 
 # --- Background Tasks ---

@@ -7,6 +7,14 @@ from machine import Pin # UART removed, handled by Modbus instances
 # --- Constants ---
 CONFIG_FILE = "config.json"
 
+# --- Encoder Constants ---
+# These values should be configured based on your specific encoder.
+PULSES_PER_REVOLUTION = 1000  # Native pulses per revolution of the encoder
+ENCODER_RESOLUTION = PULSES_PER_REVOLUTION * 4  # Steps per revolution after 4x quadrature decoding
+MAX_STEPS = ENCODER_RESOLUTION  # Max steps for one full revolution, used for wrapping/calculations
+MAX_DEGREES = 360.0             # Standard degrees in a circle
+STEPS_PER_DEGREE = MAX_STEPS / MAX_DEGREES if MAX_DEGREES > 0 else 0 # Avoid division by zero
+
 # Modbus Register Definitions (Slave Map for Network 1 - Relay Master)
 # Holding Registers (Writeable by Relay Master)
 REG_CMD = 100         # Command Register (1=START, 2=STOP, 3=REVERSE, 4=RESET_FAULT, 5=CALIBRATE, 0=No Action)

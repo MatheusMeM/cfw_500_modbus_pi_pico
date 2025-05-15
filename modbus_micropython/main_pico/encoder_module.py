@@ -2,15 +2,13 @@
 
 from machine import Pin
 from encoder import Encoder
-from utils import print_verbose, internal_state, update_input_registers, REG_ENC_POS_STEPS, REG_ENC_POS_DEG
+from utils import (
+    print_verbose, internal_state, update_input_registers,
+    REG_ENC_POS_STEPS, REG_ENC_POS_DEG,
+    PULSES_PER_REVOLUTION, ENCODER_RESOLUTION, MAX_STEPS, MAX_DEGREES, STEPS_PER_DEGREE
+)
 
-# Constants for position limits
-# Assuming 1000 PPR encoder with 4x decoding = 4000 steps/rev
-# Adjust MAX_STEPS based on your actual encoder resolution and desired wrapping behavior
-PULSES_PER_REVOLUTION = 1000 # Example: Pulses per revolution of the encoder
-ENCODER_RESOLUTION = PULSES_PER_REVOLUTION * 4 # Steps per revolution after 4x decoding
-MAX_STEPS = ENCODER_RESOLUTION # Wrap after one full revolution
-MAX_DEGREES = 360  # Maximum degrees before reset
+# Constants for position limits are now imported from utils.py
 
 # Store encoder instance globally if needed elsewhere, otherwise keep local
 _encoder_instance = None
@@ -43,7 +41,7 @@ def encoder_callback(value, delta, modbus_handler):
     'value' is the raw hardware step count from the driver.
     'delta' is the change since the last callback.
     """
-    STEPS_PER_DEGREE = MAX_STEPS / 360.0 # <<< ADD THIS LINE
+    # STEPS_PER_DEGREE is now imported from utils.py
     # Invert the raw value to correct the direction if necessary
     # Adjust this based on your wiring and desired positive direction
     inverted_value = -value
