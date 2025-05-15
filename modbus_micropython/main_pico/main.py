@@ -343,20 +343,21 @@ async def vfd_status_request_task(cfw500_master_obj): # Pass VFD master object
 
 async def relay_control_task():
     """Controls relays based on internal fault state."""
-    while True:
-        if internal_state['fault_detected']:
-            # Blink on fault
-            relay_pin1.on()
-            relay_pin2.on()
-            await asyncio.sleep_ms(500)
-            relay_pin1.off()
-            relay_pin2.off()
-            await asyncio.sleep_ms(500)
-        else:
-            # Solid on if no fault
-            relay_pin1.on()
-            relay_pin2.on()
-            await asyncio.sleep_ms(RELAY_CONTROL_INTERVAL_MS) # Check state less frequently if ok
+    # while True:
+    #     if internal_state['fault_detected']:
+    #         # Blink on fault
+    #         relay_pin1.on()
+    #         relay_pin2.on()
+    #         await asyncio.sleep_ms(500)
+    #         relay_pin1.off()
+    #         relay_pin2.off()
+    #         await asyncio.sleep_ms(500)
+    #     else:
+    #         # Solid on if no fault
+    #         relay_pin1.on()
+    #         relay_pin2.on()
+    #         await asyncio.sleep_ms(RELAY_CONTROL_INTERVAL_MS) # Check state less frequently if ok
+    pass
 
 async def modbus_slave_poll_task(modbus_handler_obj): # Pass Modbus handler object
     """ Periodically processes incoming Modbus slave requests. """
