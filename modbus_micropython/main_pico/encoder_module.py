@@ -43,6 +43,7 @@ def encoder_callback(value, delta):
     'value' is the raw hardware step count from the driver.
     'delta' is the change since the last callback.
     """
+    STEPS_PER_DEGREE = MAX_STEPS / 360.0 # <<< ADD THIS LINE
     # Invert the raw value to correct the direction if necessary
     # Adjust this based on your wiring and desired positive direction
     inverted_value = -value
@@ -57,6 +58,16 @@ def encoder_callback(value, delta):
     else:
         # Position relative to the calibrated zero point
         adjusted_position_steps = position_relative_to_home - internal_state['encoder_offset_steps']
+
+    # --- Calculate and store continuous absolute degrees ---
+    # This uses the raw position and subtracts both offsets to get steps from true zero
+    absolute_steps_from_true_zero = internal_state['encoder_raw_position'] - \
+                                    internal_state['encoder_zero_offset'] - \
+                                    internal_state['encoder_offset_steps']
+    internal_state['internal_absolute_degrees'] = absolute_steps_from_true_zero / STEPS_PER_DEGREE
+    
+    if internal_state['VERBOSE_LEVEL'] >= 3:
+        print_verbose(f"[DEBUG ENC_CB] AbsDeg: {internal_state['internal_absolute_degrees']:.2f}", 3)
 
     # --- Optional: Handle Wrapping/Overflow ---
     # This simple modulo keeps the step count within one revolution range.

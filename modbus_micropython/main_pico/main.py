@@ -42,7 +42,7 @@ RELAY_PIN1_NUM = 20
 RELAY_PIN2_NUM = 21
 
 # Timing
-STATUS_REQUEST_INTERVAL_MS = 5000 # VFD status check interval
+STATUS_REQUEST_INTERVAL_MS = 1000 # VFD status check interval (Reduced for testing encoder updates)
 RELAY_CONTROL_INTERVAL_MS = 1000 # Relay update interval
 MODBUS_SLAVE_POLL_INTERVAL_MS = 200 # How often to check for slave requests (Increased from 10ms)
 MAIN_LOOP_SLEEP_MS = 20 # Main loop sleep
@@ -420,8 +420,8 @@ async def main():
     update_input_registers(modbus_slave_handler, homing=False) # Explicitly set homing to false initially # Keep this
 
     # Initialize Encoder (uses internal_state, updates slave_registers via callback)
-    # initialize_encoder(16, 17) # Pins for encoder A, B - DISABLED FOR STEP 1.1 TEST
-    print_verbose("[INFO TEST] Encoder Disabled.", 0)
+    initialize_encoder(16, 17) # Pins for encoder A, B
+    print_verbose("[INFO] Encoder ENABLED.", 0)
 
     # --- Safety Stop ---
     try:

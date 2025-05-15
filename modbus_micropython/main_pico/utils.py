@@ -61,6 +61,7 @@ internal_state = {
     'fault_detected': False, # Internal flag, mirrored to Modbus register
     'last_written_cmd': 0, # Track last command written by master
     'last_written_rpm': 0, # Track last RPM written by master
+    'internal_absolute_degrees': 0.0, # <<< ADD THIS LINE
 }
 
 # Define critical message prefixes
