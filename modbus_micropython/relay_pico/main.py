@@ -228,14 +228,14 @@ def run_master():
 
                 if input_regs:
                     # Process and print received data to PC (USB)
-                    current_rpm = input_regs[REG_CURRENT_RPM - REG_CURRENT_RPM] / 10.0
-                    vfd_status = input_regs[REG_VFD_STATUS - REG_CURRENT_RPM]
-                    enc_steps = input_regs[REG_ENC_POS_STEPS - REG_CURRENT_RPM]
+                    current_rpm = input_regs[REG_CURRENT_RPM] / 10.0
+                    vfd_status = input_regs[REG_VFD_STATUS]
+                    enc_steps = input_regs[REG_ENC_POS_STEPS]
                     # Handle potential signed value for steps if needed (assuming unsigned for now)
-                    enc_deg = input_regs[REG_ENC_POS_DEG - REG_CURRENT_RPM] / 100.0
-                    fault_flag = bool(input_regs[REG_FAULT_FLAG - REG_CURRENT_RPM])
-                    homing_flag = bool(input_regs[REG_HOMING_FLAG - REG_CURRENT_RPM])
-                    offset_steps = input_regs[REG_OFFSET_STEPS - REG_CURRENT_RPM]
+                    enc_deg = input_regs[REG_ENC_POS_DEG] / 100.0
+                    fault_flag = bool(input_regs[REG_FAULT_FLAG])
+                    homing_flag = bool(input_regs[REG_HOMING_FLAG])
+                    offset_steps = input_regs[REG_OFFSET_STEPS]
 
                     print(f"[STATUS RX] RPM: {current_rpm:.1f}, VFD: 0x{vfd_status:04X}, EncSteps: {enc_steps}, EncDeg: {enc_deg:.2f}, Fault: {fault_flag}, Homing: {homing_flag}, Offset: {offset_steps}")
 
