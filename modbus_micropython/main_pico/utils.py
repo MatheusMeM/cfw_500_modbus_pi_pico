@@ -75,18 +75,19 @@ internal_state = {
 CRITICAL_PREFIXES = ("[SAFETY]", "[WARNING]", "[ALERT]", "[ERROR]")
 
 def print_verbose(message, level, override=False):
-    """Prints messages locally according to the verbosity level."""
-    is_critical = any(message.startswith(prefix) for prefix in CRITICAL_PREFIXES)
+    pass
+    # """Prints messages locally according to the verbosity level."""
+    # is_critical = any(message.startswith(prefix) for prefix in CRITICAL_PREFIXES)
     
-    # Use internal_state for local verbosity control
-    current_level = internal_state['VERBOSE_LEVEL']
+    # # Use internal_state for local verbosity control
+    # current_level = internal_state['VERBOSE_LEVEL']
 
-    # Determine if the message should be printed locally
-    should_print = override or is_critical or (current_level > 0 and level <= current_level)
+    # # Determine if the message should be printed locally
+    # should_print = override or is_critical or (current_level > 0 and level <= current_level)
 
-    if should_print:
-        # Only print to local console (USB)
-        print(message)
+    # if should_print:
+    #     # Only print to local console (USB)
+    #     print(message)
 
 def show_manual():
     """Displays the instruction manual locally."""

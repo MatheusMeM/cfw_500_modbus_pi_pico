@@ -43,7 +43,7 @@ RELAY_PIN1_NUM = 20
 RELAY_PIN2_NUM = 21
 
 # Timing
-STATUS_REQUEST_INTERVAL_MS = 1000 # VFD status check interval (Reduced for testing encoder updates)
+STATUS_REQUEST_INTERVAL_MS = 300 # VFD status check interval (Reduced for testing encoder updates)
 RELAY_CONTROL_INTERVAL_MS = 1000 # Relay update interval
 MODBUS_SLAVE_POLL_INTERVAL_MS = 200 # How often to check for slave requests (Increased from 10ms)
 MAIN_LOOP_SLEEP_MS = 20 # Main loop sleep
@@ -53,14 +53,20 @@ SETTLE_TIME_MS = 3500        # Time for motor to settle after VFD stop command
 HOMING_SEARCH_RPM = 800      # RPM for the initial search for the Z-pulse
 HOMING_CREEP_RPM = 400       # RPM for the slow final approach to the Z-pulse
 HOMING_BACKUP_DEGREES = 20.0 # Degrees to back up past Z-pulse after initial find
-HOMING_TIMEOUT_MS = 90000    # Timeout for major homing phases (e.g., P1, P3 search)
+HOMING_TIMEOUT_MS = 180000    # Timeout for major homing phases (e.g., P1, P3 search)
 HOMING_BACKUP_DURATION_MS = 30000 # Max duration for backup phase (P2)
 
 # --- Positioning Parameters ---
-POSITIONING_RPM = 800        # RPM to use during rotate commands
+POSITIONING_RPM = 1600        # RPM to use during rotate commands
 MIN_ROTATION_ANGLE_DEG = 1.0 # Minimum angle to rotate (smaller values rejected)
 POSITIONING_STOP_MARGIN_DEG = 5.0 # Stop motor this many degrees before target to account for inertia
-POSITIONING_TIMEOUT_MS = 60000 # Timeout for positioning movements
+POSITIONING_TIMEOUT_MS = 50000 # Timeout for positioning movements
+
+FAST_ZONE_DEG   = 60.0   # quando faltar <30° já troca p/ médio
+SLOW_ZONE_DEG   = 30.0    # quando faltar <5° entra em creep
+APPROACH_RPM    = 1000
+CREEP_RPM       = 600
+FINAL_TOLERANCE_DEG = 3  # erro máximo aceitável
 
 # --- Hardware Initialization ---
 led = Pin(LED_PIN, Pin.OUT)
@@ -546,119 +552,79 @@ async def homing(cfw500_master_obj):
 
 
 # --- Positioning Task ---
-async def position_motor(cfw500_master_obj, angle_from_command): # angle_from_command can be signed from Modbus
+async def position_motor(cfw500, angle_deg):
     """
-    Rotates the motor by the specified magnitude of angle (degrees)
-    ALWAYS in the VFD's physical FORWARD direction.
-    VFD physical FORWARD causes internal_absolute_degrees to DECREASE.
+    Gira SEMPRE para frente (VFD FORWARD) a 'angle_deg' positivos,
+    reduzindo RPM conforme se aproxima do alvo.
     """
     if positioning_in_progress_event.is_set():
-        print_verbose("[WARNING POSITION] Positioning task already in progress. New rotate command ignored.", 1)
-        # Clear the new command from the register if it was set by a rapid subsequent command
-        try:
-            if modbus_slave_handler and modbus_slave_handler.get_hreg(REG_CMD) == 7: # Check if ROTATE is still there
-                modbus_slave_handler.set_hreg(REG_CMD, 0) # Clear it
-                internal_state['last_written_cmd'] = 0
-                print_verbose("[DEBUG POSITION] Cleared REG_CMD for new rotate cmd while another was active.",3)
-        except Exception: pass # Ignore errors in this non-critical cleanup
-        return # Allow the existing positioning task to complete
-        
-    positioning_in_progress_event.set()
-    
-    # Always use the magnitude of the angle for rotation distance.
-    # Rotation is always in VFD physical FORWARD direction.
-    rotation_magnitude_deg = abs(angle_from_command)
-
-    print_verbose(f"[INFO POSITION] Command 'rotate {angle_from_command}°'. Effective magnitude for VFD physical FORWARD rotation: {rotation_magnitude_deg}°", 0)
-
-    if rotation_magnitude_deg < MIN_ROTATION_ANGLE_DEG:
-        print_verbose(f"[ERROR POSITION] Rotation magnitude {rotation_magnitude_deg}° too small (min: {MIN_ROTATION_ANGLE_DEG}°). Command ignored.", 0)
-        try:
-            if modbus_slave_handler:
-                modbus_slave_handler.set_hreg(REG_CMD, 0)
-                internal_state['last_written_cmd'] = 0
-        except Exception as e:
-            print_verbose(f"[ERROR POSITION] Failed to clear command register for small angle: {e}", 0)
-        positioning_in_progress_event.clear()
+        print_verbose("[WARN] positioning busy", 1)
         return
+    positioning_in_progress_event.set()
 
     try:
-        current_absolute_degrees = internal_state['internal_absolute_degrees']
-        print_verbose(f"[DEBUG POSITION] Current absolute_degrees: {current_absolute_degrees:.2f}°", 2)
-        
-        # Target: VFD physical FORWARD means internal_absolute_degrees will DECREASE.
-        target_absolute_degrees = current_absolute_degrees - rotation_magnitude_deg
-        
-        # Early stop: Since internal_absolute_degrees is DECREASING,
-        # stop when it's just slightly LARGER (less negative or more positive) than the final target.
-        early_stop_degrees = target_absolute_degrees + POSITIONING_STOP_MARGIN_DEG
-            
-        print_verbose(f"[DEBUG POSITION] Target absolute_degrees: {target_absolute_degrees:.2f}°, Calculated Early stop: {early_stop_degrees:.2f}° (Due to VFD physical FORWARD motion)", 2)
-        
-        # ALWAYS use VFD physical FORWARD
-        try:
-            print_verbose(f"[INFO POSITION] Starting VFD physical FORWARD at {POSITIONING_RPM} RPM to rotate by {rotation_magnitude_deg}°.", 1)
-            cfw500_master_obj.start_motor(POSITIONING_RPM) # This is VFD physical FORWARD
-            await asyncio.sleep_ms(100) # Allow motor to start ramping up
-        except Exception as e:
-            print_verbose(f"[ERROR POSITION] Failed to start motor: {e}", 0)
-            raise e # Re-raise to be caught by outer try-except
-            
-        start_time_ms = time.ticks_ms()
-        position_reached = False
-        
-        # Monitor position: internal_absolute_degrees is DECREASING
-        while time.ticks_diff(time.ticks_ms(), start_time_ms) < POSITIONING_TIMEOUT_MS:
-            current_position_loop = internal_state['internal_absolute_degrees']
-            
-            # Condition for DECREASING value: stop when current_position_loop is at or past (<=) early_stop_degrees
-            if current_position_loop <= early_stop_degrees:
-                position_reached = True
-                print_verbose(f"[DEBUG POSITION] Early stop condition met: Current {current_position_loop:.2f}° <= Early Stop {early_stop_degrees:.2f}°", 2)
+        start_abs = internal_state["internal_absolute_degrees"]
+        target_abs = start_abs - angle_deg     # FORWARD => diminui
+        print_verbose(f"[POS] start={start_abs:.2f}°  target={target_abs:.2f}°", 1)
+        print(f"[POS] start={start_abs:.2f}°  target={target_abs:.2f}°")
+
+        # --- arranca na velocidade alta -------------
+        cfw500.start_motor(POSITIONING_RPM)
+        await asyncio.sleep_ms(100)            # deixa ganhar torque
+
+        stage = 1
+        start_ms = time.ticks_ms()
+
+        while time.ticks_diff(time.ticks_ms(), start_ms) < POSITIONING_TIMEOUT_MS:
+
+            current = internal_state["internal_absolute_degrees"]
+            remaining = current - target_abs   # valor positivo enquanto não atingiu
+
+            # ----- mudança de faixa -----
+            if stage == 1 and remaining <= FAST_ZONE_DEG:
+                cfw500.set_speed_reference(APPROACH_RPM)
+                stage = 2
+                print_verbose("[POS] → APPROACH_RPM", 2)
+                print("[POS] → APPROACH_RPM")
+                val = cfw500.read_p0316()   # ou read_p0680()
+                print("P0316:", hex(val) if val else val)
+
+            elif stage == 2 and remaining <= SLOW_ZONE_DEG:
+                cfw500.set_speed_reference(CREEP_RPM)
+                stage = 3
+                print_verbose("[POS] → CREEP_RPM", 2)
+                print("[POS] → CREEP_RPM")
+                val = cfw500.read_p0316()   # ou read_p0680()
+                print("P0316:", hex(val) if val else val)
+
+
+            # ----- alvo atingido? -----
+            if remaining <= FINAL_TOLERANCE_DEG:
+                print_verbose("[POS] reached target window", 2)
                 break
-                    
-            print_verbose(f"[DEBUG POSITION] Monitoring - Current abs_deg: {current_position_loop:.2f}°, Target abs_deg: {target_absolute_degrees:.2f}°, Early Stop abs_deg: {early_stop_degrees:.2f}°", 3)
-            await asyncio.sleep_ms(20) # Check position frequently
-            
-        # Stop the motor
-        try:
-            cfw500_master_obj.stop_motor()
-            print_verbose(f"[INFO POSITION] Motor stop command sent. Waiting {SETTLE_TIME_MS}ms to settle.", 1)
-            await asyncio.sleep_ms(SETTLE_TIME_MS)
-        except Exception as e:
-            print_verbose(f"[ERROR POSITION] Failed to stop motor: {e}", 0)
-            # Don't re-raise here, try to complete reporting
-            
-        final_position = internal_state['internal_absolute_degrees'] # Read after settling
-        if position_reached:
-            position_error = final_position - target_absolute_degrees # Error can be signed: (final - target)
-            print_verbose(f"[INFO POSITION] Positioning reached. Final abs_deg: {final_position:.2f}°, Target abs_deg: {target_absolute_degrees:.2f}°. Error: {position_error:.2f}°", 0)
-        else: # Timeout
-            position_error = final_position - target_absolute_degrees
-            print_verbose(f"[ERROR POSITION] Timeout reached during positioning. Final abs_deg: {final_position:.2f}°, Target abs_deg: {target_absolute_degrees:.2f}°. Error: {position_error:.2f}°", 0)
-            
+
+            await asyncio.sleep_ms(20)
+
+        # --- parada & settling -------------
+        cfw500.stop_motor()
+        await asyncio.sleep_ms(SETTLE_TIME_MS)
+
+        final_pos = internal_state["internal_absolute_degrees"]
+        err = final_pos - target_abs
+        print_verbose(f"[POS] final={final_pos:.2f}°  err={err:.2f}°", 0)
+        print(f"[POS] final={final_pos:.2f}°  err={err:.2f}°")
+
     except Exception as e:
-        print_verbose(f"[ERROR POSITION] Positioning task failed critically: {e}", 0)
-        # Ensure motor is stopped in case of unexpected error during the task
-        try:
-            if cfw500_master_obj:
-                 cfw500_master_obj.stop_motor()
-                 print_verbose("[SAFETY POSITION] Motor stop command sent after critical error in positioning task.", 1)
-                 await asyncio.sleep_ms(SETTLE_TIME_MS) # Allow time for stop
-        except Exception as stop_e:
-            print_verbose(f"[ERROR POSITION] Failed to stop motor during critical error cleanup: {stop_e}", 0)
+        print_verbose(f"[ERR POS] {e}", 0)
+        try: cfw500.stop_motor()
+        except: pass
+
     finally:
-        # This block always runs, ensuring the command register is cleared and event is reset
-        try:
-            if modbus_slave_handler:
-                modbus_slave_handler.set_hreg(REG_CMD, 0) # Clear the ROTATE command
-                internal_state['last_written_cmd'] = 0
-                print_verbose("[DEBUG POSITION] Command register (REG_CMD) cleared after positioning attempt.", 3)
-        except Exception as e:
-            print_verbose(f"[ERROR POSITION] Failed to clear command register in finally block: {e}", 0)
-            
         positioning_in_progress_event.clear()
-        print_verbose("[INFO POSITION] Positioning task execution completed.", 1)
+        try:
+            modbus_slave_handler.set_hreg(REG_CMD, 0)
+            internal_state["last_written_cmd"] = 0
+        except: pass
 
 
 # --- Go to Calibrated Position Task ---
