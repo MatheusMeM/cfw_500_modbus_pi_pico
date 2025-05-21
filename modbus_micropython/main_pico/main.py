@@ -399,9 +399,12 @@ def handle_command_register_write(reg_type, address, val):
             return
 
         # Posição atual em steps relativa ao ZERO calibrado
+        
         current_steps = modbus_slave_handler.get_ireg(REG_ENC_POS_STEPS)  # já compensado por offset
-        delta_steps   = (target_steps - current_steps) % MAX_STEPS
+        delta_steps   = (current_steps - target_steps) % MAX_STEPS
         delta_deg     = delta_steps / (STEPS_PER_DEGREE)
+        
+        print(f"estamos em {current_steps} vamos para {target_steps}")
 
         # Ignora movimentos muito pequenos
         if delta_deg < MIN_ROTATION_ANGLE_DEG:
