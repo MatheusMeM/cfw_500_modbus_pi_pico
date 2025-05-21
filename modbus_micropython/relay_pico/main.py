@@ -175,6 +175,19 @@ def run_master():
                                     print("[ERROR] Invalid encoder mode. Use 'step' or 'deg'")
                             else:
                                 print("[ERROR] Specify encoder mode ('step' or 'deg')")
+                        elif cmd == "goto":
+                            if len(parts) > 1:
+                                tgt = int(parts[1])
+                                if 0 <= tgt < 8000:
+                                    print(f"[MODBUS TX] GOTO steps={tgt}")
+                                    time.sleep_ms(20)
+                                    modbus_master.write_multiple_registers(
+                                        MAIN_PICO_SLAVE_ADDR, REG_CMD, [9, tgt])
+                                    time.sleep_ms(20)
+                                else:
+                                    print("[ERROR] steps fora do intervalo 0-7999")
+                            else:
+                                print("[ERROR] use: goto <steps>")
                         # Read commands are handled by periodic status read below
                         elif cmd in ["read_speed", "status", "read_offset", "read_max_rpm", "help", "exit", "test"]:
                             # These commands now primarily trigger reads or are local info

@@ -12,7 +12,7 @@ from utils import (
     internal_state, slave_registers, update_input_registers,
     # Add REG_CURRENT_RPM and REG_VFD_STATUS to the import list
     REG_CMD, REG_TARGET_RPM, REG_VERBOSE, REG_ENC_MODE, REG_OFFSET_STEPS,
-    REG_FAULT_FLAG, REG_HOMING_FLAG, REG_MAX_RPM,
+    REG_FAULT_FLAG, REG_HOMING_FLAG, REG_MAX_RPM, REG_ENC_POS_STEPS,
     REG_CURRENT_RPM, REG_VFD_STATUS, # These were missing for direct use in main.py
     STEPS_PER_DEGREE, MAX_STEPS # Added for homing function
 )
@@ -65,8 +65,8 @@ POSITIONING_TIMEOUT_MS = 50000 # Timeout for positioning movements
 FAST_ZONE_DEG   = 60.0   # quando faltar <30° já troca p/ médio
 SLOW_ZONE_DEG   = 30.0    # quando faltar <5° entra em creep
 APPROACH_RPM    = 1000
-CREEP_RPM       = 600
-FINAL_TOLERANCE_DEG = 3  # erro máximo aceitável
+CREEP_RPM       = 400
+FINAL_TOLERANCE_DEG = 0.5  # erro máximo aceitável
 
 # --- Hardware Initialization ---
 led = Pin(LED_PIN, Pin.OUT)
@@ -105,6 +105,12 @@ print_verbose("[INFO] Modbus Master (UART0 for VFD) initialized.", 2)
 
 # Global for encoder instance
 main_encoder_instance = None
+
+def _clear_cmd():
+    try:
+        modbus_slave_handler.set_hreg(REG_CMD, 0)
+        internal_state['last_written_cmd'] = 0
+    except: pass
 
 # --- Modbus Register Callbacks ---
 # Define the callback function BEFORE it's assigned
@@ -377,6 +383,35 @@ def handle_command_register_write(reg_type, address, val):
             print_verbose(f"[DEBUG CB] Action Cmd {command_to_process}: REG_CMD cleared.", 3)
         except Exception as e:
             print_verbose(f"[ERROR CB] Failed to clear REG_CMD for action {command_to_process}: {e}", 0)
+    elif (command_to_process == 9): # goto
+        if isinstance(val, list) and len(val) > 1:
+            target_steps = val[1] & 0xFFFF
+            print(f"[CB] GOTO target_steps={target_steps}",2)
+        else:
+            print_verbose("[ERROR CB] GOTO sem parâmetro",0)
+            _clear_cmd()
+            return
+
+        # Homing precisa ter sido feito
+        if not internal_state['homing_completed']:
+            print_verbose("[ERROR CB] GOTO falhou: faça homing antes",0)
+            _clear_cmd()
+            return
+
+        # Posição atual em steps relativa ao ZERO calibrado
+        current_steps = modbus_slave_handler.get_ireg(REG_ENC_POS_STEPS)  # já compensado por offset
+        delta_steps   = (target_steps - current_steps) % MAX_STEPS
+        delta_deg     = delta_steps / (STEPS_PER_DEGREE)
+
+        # Ignora movimentos muito pequenos
+        if delta_deg < MIN_ROTATION_ANGLE_DEG:
+            print_verbose("[CB] GOTO: já estamos no alvo (≤1°)",1)
+            _clear_cmd()
+            return
+
+        print(f"[CB] GOTO vai avançar {delta_steps} steps  ({delta_deg:.2f}°)")
+        asyncio.create_task(position_motor(vfd_master, delta_deg))
+        # IMPORTANTE – não limpa REG_CMD aqui; position_motor cuidará disso
 
 # --- Assign Callbacks BEFORE Setup ---
 slave_registers['HREGS']['command']['on_set_cb'] = handle_command_register_write
