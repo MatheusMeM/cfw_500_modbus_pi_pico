@@ -100,6 +100,25 @@ class CFW500Modbus:
             register_address=683,
             register_value=speed_reference_value
         )
+    
+    def write_speed_reference(self, rpm_value):
+        """
+        Altera APENAS o parâmetro de referência de velocidade (P0683)
+        sem tocar no controle RUN/STOP.  Útil para desacelerações suaves
+        durante um movimento já em curso.
+        """
+        if self.max_RPM == 0:
+            raise ValueError("Maximum RPM is zero. Cannot set speed.")
+
+        rpm_value = max(0, min(rpm_value, self.max_RPM))
+        speed_reference_value = int((rpm_value / self.max_RPM) * 8192)
+        speed_reference_value = max(-32768, min(speed_reference_value, 32767))
+
+        self.modbus_master.write_single_register(
+            slave_addr=self.slave_address,
+            register_address=683,     # P0683 – speed reference
+            register_value=speed_reference_value
+        )
 
     def read_current_speed(self):
         """Reads the Current Speed (P0681) and returns RPM."""
