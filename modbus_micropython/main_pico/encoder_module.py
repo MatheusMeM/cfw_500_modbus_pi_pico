@@ -2,20 +2,18 @@
 
 from machine import Pin
 from encoder import Encoder
-from utils import print_verbose, internal_state, update_input_registers, REG_ENC_POS_STEPS, REG_ENC_POS_DEG
+from utils import (
+    print_verbose, internal_state, update_input_registers,
+    REG_ENC_POS_STEPS, REG_ENC_POS_DEG,
+    PULSES_PER_REVOLUTION, ENCODER_RESOLUTION, MAX_STEPS, MAX_DEGREES, STEPS_PER_DEGREE
+)
 
-# Constants for position limits
-# Assuming 1000 PPR encoder with 4x decoding = 4000 steps/rev
-# Adjust MAX_STEPS based on your actual encoder resolution and desired wrapping behavior
-PULSES_PER_REVOLUTION = 1000 # Example: Pulses per revolution of the encoder
-ENCODER_RESOLUTION = PULSES_PER_REVOLUTION * 4 # Steps per revolution after 4x decoding
-MAX_STEPS = ENCODER_RESOLUTION # Wrap after one full revolution
-MAX_DEGREES = 360  # Maximum degrees before reset
+# Constants for position limits are now imported from utils.py
 
 # Store encoder instance globally if needed elsewhere, otherwise keep local
 _encoder_instance = None
 
-def initialize_encoder(pin_a_num, pin_b_num):
+def initialize_encoder(pin_a_num, pin_b_num, modbus_handler_instance):
     """Initializes the encoder driver and sets the callback."""
     global _encoder_instance
     pin_a = Pin(pin_a_num, Pin.IN, Pin.PULL_UP)
@@ -30,50 +28,52 @@ def initialize_encoder(pin_a_num, pin_b_num):
         vmax=None,     # No max limit
         mod=None,      # No modulus wrapping in the driver itself
         callback=encoder_callback, # Function to call on value change
-        args=(),       # No extra args for callback
+        args=(modbus_handler_instance,), # Pass it as a tuple
         delay=10       # Delay in ms between callbacks (rate limit)
     )
     print_verbose("[INFO] Encoder initialized.", 2)
     return _encoder_instance
 
-def encoder_callback(value, delta):
+def encoder_callback(value, delta, modbus_handler):
     """
     Callback function executed by the Encoder driver when the value changes.
     Updates internal state and Modbus input registers.
     'value' is the raw hardware step count from the driver.
     'delta' is the change since the last callback.
     """
-    # Invert the raw value to correct the direction if necessary
-    # Adjust this based on your wiring and desired positive direction
-    inverted_value = -value
+    # STEPS_PER_DEGREE is now imported from utils.py
+    inverted_value = -value # Or 'value' depending on desired raw positive direction
     internal_state['encoder_raw_position'] = inverted_value
 
-    # Position relative to the homing switch trigger point
-    position_relative_to_home = inverted_value - internal_state['encoder_zero_offset']
+    # Absolute position relative to Z-pulse (Machine Zero)
+    # After homing, if at Z-pulse, encoder_raw_position ~= encoder_zero_offset, so this is ~0.
+    absolute_steps_from_machine_zero = internal_state['encoder_raw_position'] - internal_state['encoder_zero_offset']
+    internal_state['internal_absolute_degrees'] = absolute_steps_from_machine_zero / STEPS_PER_DEGREE if STEPS_PER_DEGREE != 0 else 0
 
-    # Apply the calibrated offset (in steps) only after homing is complete
-    if not internal_state['homing_completed']:
-        adjusted_position_steps = position_relative_to_home
-    else:
-        # Position relative to the calibrated zero point
-        adjusted_position_steps = position_relative_to_home - internal_state['encoder_offset_steps']
+    # Position relative to User Zero (Calibrated Offset) for Modbus reporting
+    # encoder_offset_steps is the delta from Z-pulse to the User Zero point.
+    steps_from_user_zero = absolute_steps_from_machine_zero - internal_state['encoder_offset_steps']
 
-    # --- Optional: Handle Wrapping/Overflow ---
-    # This simple modulo keeps the step count within one revolution range.
-    # The previous dynamic offset adjustment on overflow was removed for clarity.
-    # If multi-turn tracking without wrapping is needed, this logic needs changing.
-    wrapped_position_steps = adjusted_position_steps % MAX_STEPS
-    # Ensure positive result if needed (Python % can be negative)
-    # wrapped_position_steps = (wrapped_position_steps + MAX_STEPS) % MAX_STEPS
+    # MAX_STEPS is ENCODER_RESOLUTION (e.g. 8000 for a 2000PPR encoder)
+    wrapped_report_steps = steps_from_user_zero
+    if MAX_STEPS != 0: # Avoid division by zero if MAX_STEPS is somehow 0
+      wrapped_report_steps = steps_from_user_zero % MAX_STEPS
+      # Ensure positive result for modulo if MAX_STEPS is defined (Python % can be negative)
+      # wrapped_report_steps = (wrapped_report_steps + MAX_STEPS) % MAX_STEPS # Alternative for always positive
 
-    # Calculate degrees from the wrapped step position
-    degrees = (wrapped_position_steps / MAX_STEPS) * 360.0
-    # Ensure degrees are always positive [0, 360)
-    degrees = (degrees + 360) % 360
+    report_degrees = 0.0
+    if MAX_STEPS != 0: # Avoid division by zero
+        report_degrees = (wrapped_report_steps / MAX_STEPS) * 360.0
+        # Ensure degrees are always positive [0, 360)
+        report_degrees = (report_degrees + 360.0) % 360.0
 
-    # --- Update Modbus Input Registers ---
-    # Update registers with the final calculated values (relative to calibrated zero, potentially wrapped)
-    update_input_registers(enc_steps=wrapped_position_steps, enc_deg=degrees)
+
+    if internal_state['VERBOSE_LEVEL'] >= 3:
+        print_verbose(f"[DEBUG ENC_CB] Raw: {internal_state['encoder_raw_position']}, Z_Off: {internal_state['encoder_zero_offset']}, Cal_Off: {internal_state['encoder_offset_steps']}", 3)
+        print_verbose(f"[DEBUG ENC_CB] AbsStepsMachine0: {absolute_steps_from_machine_zero}, AbsDegMachine0: {internal_state['internal_absolute_degrees']:.2f}", 3)
+        print_verbose(f"[DEBUG ENC_CB] StepsUser0: {steps_from_user_zero}, WrappedReportSteps: {wrapped_report_steps}, ReportDeg: {report_degrees:.2f}", 3)
+
+    update_input_registers(modbus_handler, enc_steps=wrapped_report_steps, enc_deg=report_degrees)
 
     # --- Local Printing based on Verbosity and Mode ---
     # Read mode from internal state (which should reflect Modbus holding register)
@@ -83,9 +83,9 @@ def encoder_callback(value, delta):
     # Print locally if verbosity allows (no rate limit needed for local print)
     if verbose_level >= 1:
         if output_mode == "deg":
-            output = f"Encoder: {degrees:.2f} deg"
+            output = f"Encoder: {report_degrees:.2f} deg" # Changed 'degrees' to 'report_degrees'
         else: # mode == "step"
-            output = f"Encoder: {wrapped_position_steps} steps"
+            output = f"Encoder: {wrapped_report_steps} steps" # Changed 'wrapped_position_steps' to 'wrapped_report_steps'
         # Print level 1 messages only at level 1 or 3 (to avoid clutter at level 2)
         if verbose_level == 1 or verbose_level == 3:
              print_verbose(output, 1) # Print locally

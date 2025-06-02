@@ -7,9 +7,17 @@ from machine import Pin # UART removed, handled by Modbus instances
 # --- Constants ---
 CONFIG_FILE = "config.json"
 
+# --- Encoder Constants ---
+# These values should be configured based on your specific encoder.
+PULSES_PER_REVOLUTION = 2000  # Native pulses per revolution of the encoder
+ENCODER_RESOLUTION = PULSES_PER_REVOLUTION * 4  # Steps per revolution after 4x quadrature decoding
+MAX_STEPS = ENCODER_RESOLUTION  # Max steps for one full revolution, used for wrapping/calculations
+MAX_DEGREES = 360.0             # Standard degrees in a circle
+STEPS_PER_DEGREE = MAX_STEPS / MAX_DEGREES if MAX_DEGREES > 0 else 0 # Avoid division by zero
+
 # Modbus Register Definitions (Slave Map for Network 1 - Relay Master)
 # Holding Registers (Writeable by Relay Master)
-REG_CMD = 100         # Command Register (1=START, 2=STOP, 3=REVERSE, 4=RESET_FAULT, 5=CALIBRATE, 0=No Action)
+REG_CMD = 100         # Command Register (1=START, 2=STOP, 3=REVERSE, 4=RESET_FAULT, 5=CALIBRATE, 6=HOME, 7=ROTATE, 0=No Action)
 REG_TARGET_RPM = 101  # Target RPM for START/REVERSE/SET_SPEED
 REG_VERBOSE = 102     # Verbosity Level (0-3) for local printing
 REG_ENC_MODE = 103    # Encoder Output Mode (0=steps, 1=degrees)
@@ -34,14 +42,15 @@ slave_registers = {
         'encoder_mode':     {'register': REG_ENC_MODE,     'val': 1}, # Default 'deg'
     },
     'IREGS': { # Input Registers (Readable by Relay Master)
-        'current_rpm':      {'register': REG_CURRENT_RPM,  'val': 0},
-        'vfd_status':       {'register': REG_VFD_STATUS,   'val': 0},
-        'encoder_steps':    {'register': REG_ENC_POS_STEPS,'val': 0},
-        'encoder_degrees':  {'register': REG_ENC_POS_DEG,  'val': 0},
-        'fault_flag':       {'register': REG_FAULT_FLAG,   'val': 0},
-        'homing_flag':      {'register': REG_HOMING_FLAG,  'val': 0},
-        'offset_steps':     {'register': REG_OFFSET_STEPS, 'val': 0},
-        'max_rpm':          {'register': REG_MAX_RPM,      'val': 0}, # Correctly placed inside IREGS
+        'current_rpm':      {'register': REG_CURRENT_RPM,  'val': 0},  
+        'vfd_status':       {'register': REG_VFD_STATUS,   'val': 0xABCD}, 
+        'encoder_steps':    {'register': REG_ENC_POS_STEPS,'val': 0},   
+        'encoder_degrees':  {'register': REG_ENC_POS_DEG,  'val': 0}, 
+        'fault_flag':       {'register': REG_FAULT_FLAG,   'val': 0},      
+        'homing_flag':      {'register': REG_HOMING_FLAG,  'val': 0},       
+        'offset_steps':     {'register': REG_OFFSET_STEPS, 'val': 500},     
+        'max_rpm':          {'register': REG_MAX_RPM,      'val': 1700},
+        # --- !!! END OF CHANGE !!! ---
     },
     'COILS': {}, # Not used currently
     'ISTS': {} # Discrete Inputs (ISTS expected by library, was 'discrete_inputs')
@@ -59,24 +68,26 @@ internal_state = {
     'fault_detected': False, # Internal flag, mirrored to Modbus register
     'last_written_cmd': 0, # Track last command written by master
     'last_written_rpm': 0, # Track last RPM written by master
+    'internal_absolute_degrees': 0.0, # <<< ADD THIS LINE
 }
 
 # Define critical message prefixes
 CRITICAL_PREFIXES = ("[SAFETY]", "[WARNING]", "[ALERT]", "[ERROR]")
 
 def print_verbose(message, level, override=False):
-    """Prints messages locally according to the verbosity level."""
-    is_critical = any(message.startswith(prefix) for prefix in CRITICAL_PREFIXES)
+    pass
+    # """Prints messages locally according to the verbosity level."""
+    # is_critical = any(message.startswith(prefix) for prefix in CRITICAL_PREFIXES)
     
-    # Use internal_state for local verbosity control
-    current_level = internal_state['VERBOSE_LEVEL']
+    # # Use internal_state for local verbosity control
+    # current_level = internal_state['VERBOSE_LEVEL']
 
-    # Determine if the message should be printed locally
-    should_print = override or is_critical or (current_level > 0 and level <= current_level)
+    # # Determine if the message should be printed locally
+    # should_print = override or is_critical or (current_level > 0 and level <= current_level)
 
-    if should_print:
-        # Only print to local console (USB)
-        print(message)
+    # if should_print:
+    #     # Only print to local console (USB)
+    #     print(message)
 
 def show_manual():
     """Displays the instruction manual locally."""
@@ -117,61 +128,72 @@ def save_configuration():
     except Exception as e:
         print_verbose(f"[ERROR] Failed to save configuration: {e}", 0) # Local print
 
-def load_configuration():
-    """Loads settings from the configuration file into internal_state."""
+def load_configuration(modbus_handler): # ADD modbus_handler argument
+    """
+    Loads settings from config.json into internal_state,
+    AND updates corresponding Modbus registers VIA THE MODBUS HANDLER.
+    """
+    # Default values for internal_state if config load fails,
+    # derived from initial slave_registers which umodbus has already snapshotted.
+    # These defaults are used if config.get fails or file not found.
+    default_offset = modbus_handler.get_ireg(REG_OFFSET_STEPS) if modbus_handler else slave_registers['IREGS']['offset_steps']['val']
+    default_enc_mode_val = modbus_handler.get_hreg(REG_ENC_MODE) if modbus_handler else slave_registers['HREGS']['encoder_mode']['val']
+    default_enc_mode_str = "deg" if default_enc_mode_val == 1 else "step"
+    default_verbose = modbus_handler.get_hreg(REG_VERBOSE) if modbus_handler else slave_registers['HREGS']['verbosity_level']['val']
+
     try:
         with open(CONFIG_FILE, 'r') as f:
             config = json.load(f)
-        # Load into internal_state
-        internal_state['encoder_offset_steps'] = config.get("encoder_offset_steps", 0)
-        internal_state['encoder_output_mode'] = config.get("encoder_output_mode", "deg")
-        internal_state['VERBOSE_LEVEL'] = config.get("VERBOSE_LEVEL", 1)
 
-        # Update corresponding slave registers after loading internal state
-        slave_registers['HREGS']['verbosity_level']['val'] = internal_state['VERBOSE_LEVEL']
-        slave_registers['HREGS']['encoder_mode']['val'] = 0 if internal_state['encoder_output_mode'] == "step" else 1
-        slave_registers['IREGS']['offset_steps']['val'] = internal_state['encoder_offset_steps'] # Make offset readable
+        # Load into internal_state first
+        internal_state['encoder_offset_steps'] = config.get("encoder_offset_steps", default_offset)
+        internal_state['encoder_output_mode'] = config.get("encoder_output_mode", default_enc_mode_str)
+        internal_state['VERBOSE_LEVEL'] = config.get("VERBOSE_LEVEL", default_verbose)
 
-        print_verbose(f"[INFO] Loaded config: Offset={internal_state['encoder_offset_steps']}, Mode='{internal_state['encoder_output_mode']}', Verbose={internal_state['VERBOSE_LEVEL']}", 0) # Local print
-    except FileNotFoundError:
-        print_verbose("[WARNING] Configuration file not found. Using default settings.", 0) # Local print
-        # Ensure defaults match internal_state definition
-        internal_state['encoder_offset_steps'] = 0
-        internal_state['encoder_output_mode'] = "deg"
-        internal_state['VERBOSE_LEVEL'] = 1
-        # Update registers with defaults
-        slave_registers['HREGS']['verbosity_level']['val'] = 1
-        slave_registers['HREGS']['encoder_mode']['val'] = 1
-        slave_registers['IREGS']['offset_steps']['val'] = 0
+        # Update Modbus registers VIA THE HANDLER
+        if modbus_handler:
+            modbus_handler.set_hreg(REG_VERBOSE, internal_state['VERBOSE_LEVEL'])
+            modbus_handler.set_hreg(REG_ENC_MODE, 0 if internal_state['encoder_output_mode'] == "step" else 1)
+            modbus_handler.set_ireg(REG_OFFSET_STEPS, internal_state['encoder_offset_steps'])
+        else: # Fallback if handler not passed (e.g. during very early init, though unlikely for this function)
+            slave_registers['HREGS']['verbosity_level']['val'] = internal_state['VERBOSE_LEVEL']
+            slave_registers['HREGS']['encoder_mode']['val'] = 0 if internal_state['encoder_output_mode'] == "step" else 1
+            slave_registers['IREGS']['offset_steps']['val'] = internal_state['encoder_offset_steps']
+
+
+        print_verbose(f"[INFO] Loaded config: Offset={internal_state['encoder_offset_steps']}, Mode='{internal_state['encoder_output_mode']}', Verbose={internal_state['VERBOSE_LEVEL']}", 0)
+
     except Exception as e:
-        print_verbose(f"[ERROR] Failed to load configuration: {e}", 0) # Local print
-        # Ensure defaults match internal_state definition on error
-        internal_state['encoder_offset_steps'] = 0
-        internal_state['encoder_output_mode'] = "deg"
-        internal_state['VERBOSE_LEVEL'] = 1
-        # Update registers with defaults
-        slave_registers['HREGS']['verbosity_level']['val'] = 1
-        slave_registers['HREGS']['encoder_mode']['val'] = 1
-        slave_registers['IREGS']['offset_steps']['val'] = 0
+        print_verbose(f"[WARNING] Failed to load config ({e}). Using defaults derived from initial register state.", 0)
+        # Set internal_state to defaults derived from initial Modbus state
+        internal_state['encoder_offset_steps'] = default_offset
+        internal_state['encoder_output_mode'] = default_enc_mode_str
+        internal_state['VERBOSE_LEVEL'] = default_verbose
+        # No need to set modbus_handler registers here, as they retain their initial values from setup_registers
 
-# Function to update Modbus input registers from internal state or direct values
-def update_input_registers(rpm=None, vfd_status=None, enc_steps=None, enc_deg=None, fault=None, homing=None, offset=None, max_rpm=None): # Added max_rpm
-    """ Safely updates the Modbus slave input registers. """
-    # Access the 'val' key within the register's dictionary
-    if rpm is not None:
-        slave_registers['IREGS']['current_rpm']['val'] = int(rpm * 10) # Scale RPM
-    if vfd_status is not None:
-        slave_registers['IREGS']['vfd_status']['val'] = vfd_status
-    if enc_steps is not None:
-        # Handle potential signed value if necessary, assuming unsigned for now
-        slave_registers['IREGS']['encoder_steps']['val'] = enc_steps
-    if enc_deg is not None:
-        slave_registers['IREGS']['encoder_degrees']['val'] = int(enc_deg * 100) # Scale Degrees
-    if fault is not None:
-        slave_registers['IREGS']['fault_flag']['val'] = 1 if fault else 0
-    if homing is not None:
-        slave_registers['IREGS']['homing_flag']['val'] = 1 if homing else 0
-    if offset is not None:
-        slave_registers['IREGS']['offset_steps']['val'] = offset
-    if max_rpm is not None: # Added logic for max_rpm
-        slave_registers['IREGS']['max_rpm']['val'] = max_rpm
+
+def update_input_registers(modbus_handler, rpm=None, vfd_status=None, enc_steps=None, enc_deg=None, fault=None, homing=None, offset=None, max_rpm=None): # ADD modbus_handler
+    """ Safely updates the Modbus slave input registers VIA THE MODBUS HANDLER. """
+    if not modbus_handler:
+        print_verbose("[ERROR] update_input_registers: modbus_handler is None!", 0)
+        return
+
+    try:
+        if rpm is not None:
+            modbus_handler.set_ireg(REG_CURRENT_RPM, int(rpm * 10))
+        if vfd_status is not None:
+            modbus_handler.set_ireg(REG_VFD_STATUS, vfd_status)
+        if enc_steps is not None:
+            modbus_handler.set_ireg(REG_ENC_POS_STEPS, enc_steps)
+        if enc_deg is not None:
+            modbus_handler.set_ireg(REG_ENC_POS_DEG, int(enc_deg * 100))
+        if fault is not None:
+            modbus_handler.set_ireg(REG_FAULT_FLAG, 1 if fault else 0)
+        if homing is not None:
+            modbus_handler.set_ireg(REG_HOMING_FLAG, 1 if homing else 0)
+        if offset is not None: # This is typically set by load_configuration or calibrate callback
+            modbus_handler.set_ireg(REG_OFFSET_STEPS, offset)
+        if max_rpm is not None:
+            modbus_handler.set_ireg(REG_MAX_RPM, max_rpm) # Should be int
+    except Exception as e:
+        print_verbose(f"[ERROR] Failed to update IREG via modbus_handler: {e}", 0)
